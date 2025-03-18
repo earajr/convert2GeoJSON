@@ -528,7 +528,7 @@ def order_lines_into_contours(lines, cont_mask, mask):
                     contour += add_intervening_points([new_line[1][1], new_line[0][1]], [new_line[1][0], new_line[0][0]])
                     contour_end = (new_line[1][0], new_line[0][0])
 
-                print(contour_end)
+#                print(contour_end)
                 # Check if the end matches the start point and break while loop if it does
                 if contour_end == start_point:
                     break
@@ -608,7 +608,7 @@ def order_lines_into_contours2(lines, cont_mask, inv_cont_mask, mask):
 
     end = time.time()
     elapsed = end - start
-    print("Time to produce line segment dictionary: ", elapsed) 
+#    print("Time to produce line segment dictionary: ", elapsed) 
 
     # Create empty contours list
     contours = []
@@ -616,7 +616,7 @@ def order_lines_into_contours2(lines, cont_mask, inv_cont_mask, mask):
     # While there are still entries in the line_dictionary continue to create new contours.
     while bool(line_dict):
 
-        print(len(line_dict.keys()))
+#        print(len(line_dict.keys()))
 
         # Select random starting point
         random_point = random.choice(list(line_dict.items()))
@@ -973,7 +973,7 @@ def identify_loop_path2(start_point, branch_point, line_dict, orientation_flag, 
             else:
                 inv_val_list.append(possible_routes_inv_mask_vals[i])
 
-    print("NUMBER OF POSSIBLE ROUTES: ", len(possible_routes))
+#    print("NUMBER OF POSSIBLE ROUTES: ", len(possible_routes))
 
     if len(possible_routes) > 1:
         unresolved_loop = True
@@ -1314,7 +1314,7 @@ def pixel_outline_contour2(data, min_val, max_val):
     mask[data >= max_val] = 3
     end = time.time()
     elapsed = end - start
-    print("Time to produce mask: ", elapsed)
+#    print("Time to produce mask: ", elapsed)
 
     # create binary mask of valid and invalid areas
     start = time.time()
@@ -1325,14 +1325,14 @@ def pixel_outline_contour2(data, min_val, max_val):
     inv_cont_mask, inv_num_features = scipy.ndimage.label(inv_bin_mask)
     end = time.time()
     elapsed = end - start
-    print("Time to produce cont and inv cont masks: ", elapsed)
+#    print("Time to produce cont and inv cont masks: ", elapsed)
 
     # Get the lines that outline the regions
     start = time.time()
     line_segments = contour_rect(mask)
     end = time.time()
     elapsed = end - start
-    print("Time to produce line segments: ", elapsed)
+#    print("Time to produce line segments: ", elapsed)
 
     # retrieve contours based off the line segments and the mask
 
@@ -1500,8 +1500,9 @@ def read_data_from_wrf2d(file_path, var, contour_dict, level_dict):
 
         if i == 0:
             lat_temp, lon_temp = latlon_coords(data_temp)
-            grid_id = int(extract_global_attrs(wrf_in, 'GRID_ID')['GRID_ID'])
+            grid_id = str(int(extract_global_attrs(wrf_in, 'GRID_ID')['GRID_ID']))
             sim_start_time = extract_global_attrs(wrf_in, 'SIMULATION_START_DATE')['SIMULATION_START_DATE']
+            sim_start_time = sim_start_time.replace('_', 'T')
             valid_time = str(extract_times(wrf_in, ALL_TIMES)[0])[0:22]
             dx = float(extract_global_attrs(wrf_in, 'DX')['DX'])
             dx_units = "m"
@@ -1602,8 +1603,9 @@ def read_data_from_wrf3dp(file_path, var, contour_dict, level_dict):
 
         if i == 0:
             lat_temp, lon_temp = latlon_coords(data_temp)
-            grid_id = int(extract_global_attrs(wrf_in, 'GRID_ID')['GRID_ID'])
+            grid_id = str(int(extract_global_attrs(wrf_in, 'GRID_ID')['GRID_ID']))
             sim_start_time = extract_global_attrs(wrf_in, 'SIMULATION_START_DATE')['SIMULATION_START_DATE']
+            sim_start_time = sim_start_time.replace('_', 'T')
             valid_time = str(extract_times(wrf_in, ALL_TIMES)[0])[0:22]
             dx = float(extract_global_attrs(wrf_in, 'DX')['DX'])
             dx_units = "m"
@@ -1705,8 +1707,9 @@ def read_data_from_wrf3dh(file_path, var, contour_dict, level_dict):
 
         if i == 0:
             lat_temp, lon_temp = latlon_coords(data_temp)
-            grid_id = int(extract_global_attrs(wrf_in, 'GRID_ID')['GRID_ID'])
+            grid_id = str(int(extract_global_attrs(wrf_in, 'GRID_ID')['GRID_ID']))
             sim_start_time = extract_global_attrs(wrf_in, 'SIMULATION_START_DATE')['SIMULATION_START_DATE']
+            sim_start_time = sim_start_time.replace('_', 'T')
             valid_time = str(extract_times(wrf_in, ALL_TIMES)[0])[0:22]
             dx = float(extract_global_attrs(wrf_in, 'DX')['DX'])
             dx_units = "m"
@@ -2731,14 +2734,27 @@ def get_contour_feature_data(var, lat, lon, contours, thresholds, metadata, hex_
 
     feature_collection = {
         "type": "FeatureCollection",
-        "levels": {i: level for i, level in enumerate(contours)},
-        "hex_palette":hex_palette
+        "properties": {
+            "levels": {i: level for i, level in enumerate(contours)},
+            "hex_palette":hex_palette
+        }
     }
 
+#    feature_collection = {
+#        "type": "FeatureCollection",
+#        "levels": {i: level for i, level in enumerate(contours)},
+#        "hex_palette":hex_palette
+#    }
+
     for key, value in metadata.items():
-        feature_collection[key] = value
+        feature_collection["properties"][key] = value
 
     feature_collection["features"] = []
+
+#    for key, value in metadata.items():
+#        feature_collection[key] = value
+#
+#    feature_collection["features"] = []
 
     # Get contour and cell data using specified contours and thresholds
     level_contours, level_cells = get_level_data(var, contours, thresholds, lat, lon, contour_method)

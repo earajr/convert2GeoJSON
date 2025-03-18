@@ -1,9 +1,10 @@
 #!/bin/bash
 
-source /home/earajr/anaconda3/etc/profile.d/conda.sh
-conda activate convert2geojson
+eval "$(micromamba shell hook --shell=bash)"
+micromamba activate convert2geojson_test 
 
-script_dir="/home/earajr/convert2GEOJSON"
+script_dir="/home/earajr/convert2GEOJSON/convert2GeoJSON"
+cd ${script_dir}
 job_list=${script_dir}"/geojson_job_list.txt"
 
 indir=$1
@@ -38,7 +39,7 @@ do
 		    thresh="0.0 10.0 20.0 30.0 40.0 50.0 60.0 200.0"
                 fi
 
-                echo "python convert2GEOJSON.py --input_file ${fil} --output_dir . --var_name ${vars[i]} --source ${var_source[i]} --contour_thresholds ${thresh} --level ${lev}" >> ${job_list}
+                echo "python convert2GeoJSON.py --input_file ${fil} --output_dir . --var_name ${vars[i]} --source ${var_source[i]} --contour_thresholds ${thresh} --level ${lev} --contour_method pixel" >> ${job_list}
 #                python convert2GEOJSON.py --input_file ${fil} --output_dir . --var_name ${vars[i]} --source ${var_source[i]} --contour_thresholds ${thresh} --level ${lev}
 
             done
@@ -55,7 +56,7 @@ do
 		thresh="-20 -18 -16 -14 -12 -10 -8 -6 -4 -2 0 2 4 6 8 10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40 50"
 	    fi
 		
-            echo "python convert2GEOJSON.py --input_file ${fil} --output_dir . --var_name ${vars[i]} --source ${var_source[i]} --contour_thresholds ${thresh}" >> ${job_list}
+            echo "python convert2GeoJSON.py --input_file ${fil} --output_dir . --var_name ${vars[i]} --source ${var_source[i]} --contour_thresholds ${thresh} --contour_method pixel" >> ${job_list}
 #            python convert2GEOJSON.py --input_file ${fil} --output_dir . --var_name ${vars[i]} --source ${var_source[i]} --contour_thresholds ${thresh}
         fi
     done
@@ -63,4 +64,3 @@ done
 
 #parallel -j 20 < ${job_list}
 
-#python convert2GEOJSON.py --input_file /home/force-nwr/nwr/uk/data/2024041000/wrfout_d02_2024-04-10_15\:00\:00 . --var_name dBZ --source NCASradar --contour_thresholds -20.0 -10.0 0.0 10.0 20.0 30.0 40.0 50.0 60.0 200.0 --level 2000 --smooth
