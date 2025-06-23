@@ -1,29 +1,31 @@
 import numpy as np
 import utils
+import contouring_par
 
-def read_datafile(source, file_path, var, contour_dict, level_dict):
+def read_datafile(source, file_path, var, contour_dict, level_dict, max_workers):
     """
-#   Decide on which reader to use based on source variable and extract data
-#
-#   Parameters
-#   ----------
-#   source : str
-#       The source of the data (which model, observation type etc)
-#   file_path : str
-#       path to the input file.
-#   var : str
-#       Name of variable to be read
-#
-#   Returns
-#   -------
-#   data_dict: dictionary
-#       Dictionary of variable values, latitudes, longitudes and metadata
-#
+    Decide on which reader to use based on source variable and extract data
+ 
+    Parameters
+    ----------
+    source : str
+        The source of the data (which model, observation type etc)
+    file_path : str
+        path to the input file.
+    var : str
+        Name of variable to be read
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
     """
     data_readers = {
         'WRF2d': read_data_from_wrf2d,
         'WRF3dp': read_data_from_wrf3dp,
         'WRF3dh': read_data_from_wrf3dh,
+        'WRFhybridp': read_data_from_hybrid_vert_wrf,
         'HYSPLIT': read_data_from_HYSPLIT,
         'CRR': read_data_from_CRR,
         'NCASradar': read_data_from_NCASradar,
@@ -37,26 +39,29 @@ def read_datafile(source, file_path, var, contour_dict, level_dict):
 
     data_reader_func = data_readers[source]
 
-    return data_reader_func(file_path, var, contour_dict, level_dict)
+    if source == 'CRR':
+        return data_reader_func(file_path, var, contour_dict, level_dict, max_workers=max_workers)
+    else:
+        return data_reader_func(file_path, var, contour_dict, level_dict)
 
 def read_data_from_wrf2d(file_path, var, contour_dict, level_dict):
     """
-#   Get data from WRF netcdf input file
-#
-#   Parameters
-#   ----------
-#   file_path : str
-#       Input file path
-#   var : str
-#       NetCDF variable to extract
-#   contour_dict: dictionary
-#       Information about the contour levels that have (or haven't) been supplied as arguments
-#
-#   Returns
-#   -------
-#   data_dict: dictionary
-#       Dictionary of variable values, latitudes, longitudes and metadata
-#
+    Get data from WRF netcdf input file
+ 
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
     """
     from netCDF4 import Dataset
     from wrf import (getvar, ALL_TIMES, latlon_coords, extract_times, extract_global_attrs, is_standard_wrf_var)
@@ -72,18 +77,18 @@ def read_data_from_wrf2d(file_path, var, contour_dict, level_dict):
     for i in np.arange(0, num_times, 1):
 
         if var == "T2":
-            data_temp = getvar(wrf_in, var, timeidx=i)-273.15
+            data = getvar(wrf_in, var, timeidx=i)-273.15
             units = "degC"
         else:
-            data_temp = getvar(wrf_in, var, timeidx=i)
+            data = getvar(wrf_in, var, timeidx=i)
             if i == 0:
                 if is_standard_wrf_var(wrf_in, var):
                     units = wrf_in.variables[var].units
                 else:
-                    units = data_temp.units
+                    units = data.units
 
         if i == 0:
-            lat_temp, lon_temp = latlon_coords(data_temp)
+            lat, lon = latlon_coords(data)
             grid_id = str(int(extract_global_attrs(wrf_in, 'GRID_ID')['GRID_ID']))
             sim_start_time = extract_global_attrs(wrf_in, 'SIMULATION_START_DATE')['SIMULATION_START_DATE']
             sim_start_time = sim_start_time.replace('_', 'T')
@@ -100,42 +105,11 @@ def read_data_from_wrf2d(file_path, var, contour_dict, level_dict):
                 rec_sigma = 1.5
 
         # Max and min values in data
-        max_int_data = np.ceil(np.nanmax(data_temp))
-        min_int_data = np.floor(np.nanmin(data_temp))
+        max_int_data = np.ceil(np.nanmax(data))
+        min_int_data = np.floor(np.nanmin(data))
 
        # Define LEVELS and THRESHOLDS (not actual max min values, just to et approriate values for data to be added to extra frame around data.
         CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
-
-        '''
-        # Add additional frame around where data is present and populate with lat and lon values using finite difference approach
-
-        lat = np.zeros((np.shape(lat_temp)[0]+2, np.shape(lat_temp)[1]+2))
-        lat[1:-1,1:-1] = lat_temp
-        lat[0,:] = lat[1,:]-(lat[2,:]-lat[1,:])
-        lat[-1,:] = lat[-2,:] + (lat[-2,:]-lat[-3,:])
-        lat[:,0] = lat[:,1]-(lat[:,2]-lat[:,1])
-        lat[:,-1] = lat[:,-2] + (lat[:,-2]-lat[:,-3])
-
-        lon = np.zeros((np.shape(lon_temp)[0]+2, np.shape(lon_temp)[1]+2))
-        lon[1:-1,1:-1] = lon_temp
-        lon[0,:] = lon[1,:]-(lon[2,:]-lon[1,:])
-        lon[-1,:] = lon[-2,:] + (lon[-2,:]-lon[-3,:])
-        lon[:,0] = lon[:,1]-(lon[:,2]-lon[:,1])
-        lon[:,-1] = lon[:,-2] + (lon[:,-2]-lon[:,-3])
-
-        # Fill variables in empty frame around data with the current lowest value in the dataset
-        data_min = np.amin(data_temp)
-        edge_list = list(data_temp[0,:])+list(data_temp[-1,:])+list(data_temp[:,0])+list(data_temp[:,-1])
-        edge_min = np.amin(edge_list)
-        data_step = THRESHOLDS[1]-THRESHOLDS[0]
-        data = np.zeros((np.shape(data_temp)[0]+2, np.shape(data_temp)[1]+2))
-        data[ data == 0.0 ] =  edge_min - data_step
-        data[1:-1,1:-1] = data_temp
-        '''
-
-        lat = lat_temp
-        lon = lon_temp
-        data = data_temp
 
         entry_name = f"entry{i:03d}"
         data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
@@ -147,25 +121,25 @@ def read_data_from_wrf2d(file_path, var, contour_dict, level_dict):
 
 def read_data_from_wrf3dp(file_path, var, contour_dict, level_dict):
     """
-#   Get data from WRF netcdf input file
-#
-#   Parameters
-#   ----------
-#   file_path : str
-#       Input file path
-#   var : str
-#       NetCDF variable to extract
-#   contour_dict : dictionary
-#       Dictionary that provides information on contours
-#   level_dict : dictionary
-#       Dictionary that provides information on pressure level
-#
-#   Returns
-#   -------
-#   list
-#       List comprising of data, latitudes, longitudes and file
-#       metadata
-#
+    Get data from WRF netcdf input file
+ 
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    contour_dict : dictionary
+        Dictionary that provides information on contours
+    level_dict : dictionary
+        Dictionary that provides information on pressure level
+ 
+    Returns
+    -------
+    list
+        List comprising of data, latitudes, longitudes and file
+        metadata
+ 
     """
     from netCDF4 import Dataset
     from wrf import (getvar, ALL_TIMES, latlon_coords, extract_times, extract_global_attrs, is_standard_wrf_var, interplevel)
@@ -183,16 +157,16 @@ def read_data_from_wrf3dp(file_path, var, contour_dict, level_dict):
         data_temp_3d = getvar(wrf_in, var, timeidx=i)
         p = getvar(wrf_in, "pressure", timeidx=i)
 
-        data_temp = interplevel(data_temp_3d, p, level_dict["level_id"])
+        data = interplevel(data_temp_3d, p, level_dict["level_id"])
 
         if i == 0:
             if is_standard_wrf_var(wrf_in, var):
                 units = wrf_in.variables[var].units
             else:
-                units = data_temp.units
+                units = data.units
 
         if i == 0:
-            lat_temp, lon_temp = latlon_coords(data_temp)
+            lat, lon = latlon_coords(data)
             grid_id = str(int(extract_global_attrs(wrf_in, 'GRID_ID')['GRID_ID']))
             sim_start_time = extract_global_attrs(wrf_in, 'SIMULATION_START_DATE')['SIMULATION_START_DATE']
             sim_start_time = sim_start_time.replace('_', 'T')
@@ -209,43 +183,12 @@ def read_data_from_wrf3dp(file_path, var, contour_dict, level_dict):
                 rec_sigma = 1.5
 
         # Max and min values in data
-        max_int_data = np.ceil(np.nanmax(data_temp))
-        min_int_data = np.floor(np.nanmin(data_temp))
+        max_int_data = np.ceil(np.nanmax(data))
+        min_int_data = np.floor(np.nanmin(data))
 
         # Define LEVELS and THRESHOLDS (not actual max min values, just to et approriate values for data to be added to extra frame around data.
         CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
         
-        '''
-        # Add additional frame around where data is present and populate with lat and lon values using finite difference approach
-
-        lat = np.zeros((np.shape(lat_temp)[0]+2, np.shape(lat_temp)[1]+2))
-        lat[1:-1,1:-1] = lat_temp
-        lat[0,:] = lat[1,:]-(lat[2,:]-lat[1,:])
-        lat[-1,:] = lat[-2,:] + (lat[-2,:]-lat[-3,:])
-        lat[:,0] = lat[:,1]-(lat[:,2]-lat[:,1])
-        lat[:,-1] = lat[:,-2] + (lat[:,-2]-lat[:,-3])
-
-        lon = np.zeros((np.shape(lon_temp)[0]+2, np.shape(lon_temp)[1]+2))
-        lon[1:-1,1:-1] = lon_temp
-        lon[0,:] = lon[1,:]-(lon[2,:]-lon[1,:])
-        lon[-1,:] = lon[-2,:] + (lon[-2,:]-lon[-3,:])
-        lon[:,0] = lon[:,1]-(lon[:,2]-lon[:,1])
-        lon[:,-1] = lon[:,-2] + (lon[:,-2]-lon[:,-3])
-
-        # Fill variables in empty frame around data with the current lowest value in the dataset
-        data_min = np.amin(data_temp)
-        edge_list = list(data_temp[0,:])+list(data_temp[-1,:])+list(data_temp[:,0])+list(data_temp[:,-1])
-        edge_min = np.amin(edge_list)
-        data_step = THRESHOLDS[1]-THRESHOLDS[0]
-        data = np.zeros((np.shape(data_temp)[0]+2, np.shape(data_temp)[1]+2))
-        data[ data == 0.0 ] =  edge_min - data_step
-        data[1:-1,1:-1] = data_temp
-        '''
-
-        lat = lat_temp
-        lon = lon_temp
-        data = data_temp
-
         entry_name = f"entry{i:03d}"
         data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
 
@@ -257,25 +200,25 @@ def read_data_from_wrf3dp(file_path, var, contour_dict, level_dict):
 
 def read_data_from_wrf3dh(file_path, var, contour_dict, level_dict):
     """
-#   Get data from WRF netcdf input file
-#
-#   Parameters
-#   ----------
-#   input_file : str
-#       Input file path
-#   nc_var : str
-#       NetCDF variable to extract
-#   contour_dict : dictionary
-#       Dictionary providing information on contour levels
-#   level_dict : dictionary
-#       Dictionary providing information on height level
-#
-#   Returns
-#   -------
-#   list
-#       List comprising of data, latitudes, longitudes and file
-#       metadata
-#
+    Get data from WRF netcdf input file
+ 
+    Parameters
+    ----------
+    input_file : str
+        Input file path
+    nc_var : str
+        NetCDF variable to extract
+    contour_dict : dictionary
+        Dictionary providing information on contour levels
+    level_dict : dictionary
+        Dictionary providing information on height level
+ 
+    Returns
+    -------
+    list
+        List comprising of data, latitudes, longitudes and file
+        metadata
+ 
     """
     from netCDF4 import Dataset
     from wrf import (getvar, ALL_TIMES, latlon_coords, extract_times, extract_global_attrs, is_standard_wrf_var, interplevel)
@@ -293,16 +236,16 @@ def read_data_from_wrf3dh(file_path, var, contour_dict, level_dict):
         data_temp_3d = getvar(wrf_in, var, timeidx=i)
         z = getvar(wrf_in, "z", timeidx=i, units="m")
 
-        data_temp = interplevel(data_temp_3d, z, level_dict["level_id"])
+        data = interplevel(data_temp_3d, z, level_dict["level_id"])
 
         if i == 0:
             if is_standard_wrf_var(wrf_in, var):
                 units = wrf_in.variables[var].units
             else:
-                units = data_temp.units
+                units = data.units
 
         if i == 0:
-            lat_temp, lon_temp = latlon_coords(data_temp)
+            lat, lon = latlon_coords(data)
             grid_id = str(int(extract_global_attrs(wrf_in, 'GRID_ID')['GRID_ID']))
             sim_start_time = extract_global_attrs(wrf_in, 'SIMULATION_START_DATE')['SIMULATION_START_DATE']
             sim_start_time = sim_start_time.replace('_', 'T')
@@ -319,42 +262,11 @@ def read_data_from_wrf3dh(file_path, var, contour_dict, level_dict):
                 rec_sigma = 1.5
 
        # Max and min values in data
-        max_int_data = np.ceil(np.nanmax(data_temp))
-        min_int_data = np.floor(np.nanmin(data_temp))
+        max_int_data = np.ceil(np.nanmax(data))
+        min_int_data = np.floor(np.nanmin(data))
 
         # Define LEVELS and THRESHOLDS (not actual max min values, just to set approriate values for data to be added to extra frame around data.
         CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
-
-        # Add additional frame around where data is present and populate with lat and lon values using finite difference approach
-
-        '''
-        lat = np.zeros((np.shape(lat_temp)[0]+2, np.shape(lat_temp)[1]+2))
-        lat[1:-1,1:-1] = lat_temp
-        lat[0,:] = lat[1,:]-(lat[2,:]-lat[1,:])
-        lat[-1,:] = lat[-2,:] + (lat[-2,:]-lat[-3,:])
-        lat[:,0] = lat[:,1]-(lat[:,2]-lat[:,1])
-        lat[:,-1] = lat[:,-2] + (lat[:,-2]-lat[:,-3])
-
-        lon = np.zeros((np.shape(lon_temp)[0]+2, np.shape(lon_temp)[1]+2))
-        lon[1:-1,1:-1] = lon_temp
-        lon[0,:] = lon[1,:]-(lon[2,:]-lon[1,:])
-        lon[-1,:] = lon[-2,:] + (lon[-2,:]-lon[-3,:])
-        lon[:,0] = lon[:,1]-(lon[:,2]-lon[:,1])
-        lon[:,-1] = lon[:,-2] + (lon[:,-2]-lon[:,-3])
-
-        # Fill variables in empty frame around data with the current lowest value in the dataset
-        data_min = np.amin(data_temp)
-        edge_list = list(data_temp[0,:])+list(data_temp[-1,:])+list(data_temp[:,0])+list(data_temp[:,-1])
-        edge_min = np.amin(edge_list)
-        data_step = THRESHOLDS[1]-THRESHOLDS[0]
-        data = np.zeros((np.shape(data_temp)[0]+2, np.shape(data_temp)[1]+2))
-        data[ data == 0.0 ] =  edge_min - data_step
-        data[1:-1,1:-1] = data_temp
-        '''
-
-        lat = lat_temp
-        lon = lon_temp
-        data = data_temp
 
         entry_name = f"entry{i:03d}"
         data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
@@ -364,26 +276,119 @@ def read_data_from_wrf3dh(file_path, var, contour_dict, level_dict):
 
     return data_dict
 
+def read_data_from_hybrid_vert_wrf(file_path, var, contour_dict, level_dict):
+    """
+    Get data from FORCE hybrid pressure level WRF netcdf input file
+    WORK IN PROGRESS
+ 
+    Parameters
+    ----------
+    input_file : str
+        Input file path
+    nc_var : str
+        NetCDF variable to extract
+    contour_dict : dictionary
+        Dictionary providing information on contour levels
+    level_dict : dictionary
+        Dictionary providing information on height level
+ 
+    Returns
+    -------
+    list
+        List comprising of data, latitudes, longitudes and file
+        metadata
+ 
+    """
+    from netCDF4 import Dataset, num2date
+    from wrf import interplevel
+    import cftime
+
+    # Read input data
+    wrf_in = Dataset(file_path, "r")
+    times = wrf_in.variables["time"]
+    dtimes = num2date(times[:], times.units)
+    num_times = np.shape(dtimes)[0]
+
+    data_dict = {}
+
+    a = wrf_in.variables["a"][:]
+    a_reshaped = a.reshape(1,-1,1,1)
+    b = wrf_in.variables["b"][:]
+    b_reshaped = b.reshape(1,-1,1,1)
+    ps = wrf_in.variables["ps"][:]
+    ps_reshaped = ps.reshape(ps.shape[0],1,ps.shape[1],ps.shape[2])
+
+    lat = wrf_in.variables["latitude"][:]
+    lon = wrf_in.variables["longitude"][:]
+
+    data_temp_3d = wrf_in.variables[var][:]
+    pres = a_reshaped + (b_reshaped*ps_reshaped)
+
+    data_temp_level = interplevel(data_temp_3d, pres, level_dict["level_id"])
+
+    for i in np.arange(0, num_times, 1):
+
+        data = data_temp_level[i].values
+
+        if i == 0:
+            grid_id = "unknown"
+            sim_start_time = "unknown"
+            sim_start_time = sim_start_time.replace('_', 'T')
+            level_type = "P"+level_dict["level_id"]
+            units = wrf_in.variables[var].units
+        
+            lat_diff = np.abs((lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)] - lat[int(np.shape(lat)[0]/2)+1,int(np.shape(lat)[1]/2)]) * 110.948)
+            lon_diff = np.abs((lon[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)] - lon[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)+1]) * 110.948 * np.cos(np.deg2rad(lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)])))
+
+            dx = float(round(((lat_diff + lon_diff)/2.0)*10.0)/10.0)
+            dx_units = "km"
+
+            if dx < 20000:
+                if dx >= 1000:
+                    rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1000.0)
+                else:
+                    rec_sigma = 5.0
+            else:
+                rec_sigma = 1.5
+
+        valid_time = dtimes[i].isoformat()
+
+       # Max and min values in data
+        max_int_data = np.ceil(np.nanmax(data))
+        min_int_data = np.floor(np.nanmin(data))
+
+        # Define LEVELS and THRESHOLDS (not actual max min values, just to set approriate values for data to be added to extra frame around data.
+        CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
+
+        entry_name = f"entry{i:03d}"
+
+        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : int(dx), 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
+
+    # Close wrf_in file
+    wrf_in.close()
+
+    return data_dict
+
 def read_data_from_HYSPLIT(file_path, var, contour_dict, level_dict):
     """
-#   Get concentration data from HYSPLIT netcdf input file
-#
-#   Parameters
-#   ----------
-#   file_path : str
-#       Input file path
-#   var : str
-#       NetCDF variable to extract
-#   contour_dict: dictionary
-#       Information about the contour levels that have (or haven't) been supplied as arguments
-#   level_dict : dictionary
-#       Information about the level
-#
-#   Returns
-#   -------
-#   data_dict: dictionary
-#       Dictionary of variable values, latitudes, longitudes and metadata
-#
+    Get concentration data from HYSPLIT netcdf input file
+ 
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+    level_dict : dictionary
+        Information about the level
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
     """
 
     from netCDF4 import Dataset
@@ -437,9 +442,9 @@ def read_data_from_HYSPLIT(file_path, var, contour_dict, level_dict):
     else:
         rec_sigma = 1.5
 
-    lat_temp, lon_temp = np.meshgrid(lat_1d, lon_1d)
-    lat_temp = lat_temp.transpose()
-    lon_temp = lon_temp.transpose()
+    lat, lon = np.meshgrid(lat_1d, lon_1d)
+    lat = lat.transpose()
+    lon = lon.transpose()
 
     # Max and min values in data
     max_int_data = np.nanmax(data_temp4d)
@@ -447,26 +452,6 @@ def read_data_from_HYSPLIT(file_path, var, contour_dict, level_dict):
 
     # Define LEVELS and THRESHOLDS (not actual max min values, just to set approriate values for data to be added to extra frame around data.
     CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
-
-    '''
-    # Add additional frame around where data is present and populate with lat and lon values using finite difference approach
-    lat = np.zeros((np.shape(lat_temp)[0]+2, np.shape(lat_temp)[1]+2))
-    lat[1:-1,1:-1] = lat_temp
-    lat[0,:] = lat[1,:]-(lat[2,:]-lat[1,:])
-    lat[-1,:] = lat[-2,:] + (lat[-2,:]-lat[-3,:])
-    lat[:,0] = lat[:,1]-(lat[:,2]-lat[:,1])
-    lat[:,-1] = lat[:,-2] + (lat[:,-2]-lat[:,-3])
-
-    lon = np.zeros((np.shape(lon_temp)[0]+2, np.shape(lon_temp)[1]+2))
-    lon[1:-1,1:-1] = lon_temp
-    lon[0,:] = lon[1,:]-(lon[2,:]-lon[1,:])
-    lon[-1,:] = lon[-2,:] + (lon[-2,:]-lon[-3,:])
-    lon[:,0] = lon[:,1]-(lon[:,2]-lon[:,1])
-    lon[:,-1] = lon[:,-2] + (lon[:,-2]-lon[:,-3])
-    '''
-
-    lat = lat_temp
-    lon = lon_temp
 
     count = 0
 
@@ -479,20 +464,7 @@ def read_data_from_HYSPLIT(file_path, var, contour_dict, level_dict):
 
             entry_name = f"entry{count:03d}"
 
-            data_temp = data_temp4d[i,j,:,:]
-
-            '''
-            # Fill variables in empty frame around data with the current lowest value in the dataset
-            data_min = np.amin(data_temp)
-            edge_list = list(data_temp[0,:])+list(data_temp[-1,:])+list(data_temp[:,0])+list(data_temp[:,-1])
-            edge_min = np.amin(edge_list)
-            data_step = THRESHOLDS[1]-THRESHOLDS[0]
-            data = np.zeros((np.shape(data_temp)[0]+2, np.shape(data_temp)[1]+2))
-            data[ data == 0.0 ] =  edge_min - data_step
-            data[1:-1,1:-1] = data_temp
-            '''
-
-            data = data_temp
+            data = data_temp4d[i,j,:,:]
 
             data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : rec_sigma, 'origin_lats' : olats, 'origin_lons' : olons, 'origin_levels' : olvls, 'origin_times' : otims}}
 
@@ -502,32 +474,45 @@ def read_data_from_HYSPLIT(file_path, var, contour_dict, level_dict):
 
     return data_dict
 
-def read_data_from_CRR_backup(file_path, var, contour_dict, level_dict):
+def read_data_from_CRR(file_path, var, contour_dict, level_dict, max_workers):
     """
-#   Get concentration data from CRR netcdf input file
-#
-#   Parameters
-#   ----------
-#   file_path : str
-#       Input file path
-#   var : str
-#       NetCDF variable to extract
-#   contour_dict: dictionary
-#       Information about the contour levels that have (or haven't) been supplied as arguments
-#   level_dict : dictionary
-#       Information about the level
-#
-#   Returns
-#   -------
-#   data_dict: dictionary
-#       Dictionary of variable values, latitudes, longitudes and metadata
-#
+    Get concentration data from CRR netcdf input file
+ 
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+    level_dict : dictionary
+        Information about the level
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
     """
 
     from netCDF4 import Dataset
     from datetime import datetime, timedelta
     from scipy.spatial import ConvexHull
     from skimage import measure
+    from shapely.geometry import mapping
+    import yaml
+    import os
+
+    default_region="Africa"
+    
+    try:
+        # Read the CRR_config.yml file to retrieve region to be processed.
+        with open('CRR_config.yml', 'r') as file:
+            config = yaml.safe_load(file)
+            region = config['CRR_reader_config']['region']
+    except:
+        region = default_region
 
     # create data dictionary 
     data_dict = {}
@@ -548,43 +533,19 @@ def read_data_from_CRR_backup(file_path, var, contour_dict, level_dict):
 
     # Read in lat and lon values
     if "lat" in CRR_in.variables.keys():
-        lat_temp = CRR_in.variables["lat"][:]
+        lat = CRR_in.variables["lat"][:]
     if "lon" in CRR_in.variables.keys():
-        lon_temp = CRR_in.variables["lon"][:]
-    if lat_temp is None or lon_temp is None:
+        lon = CRR_in.variables["lon"][:]
+    if lat is None or lon is None:
         raise ValueError("Could not get latitude/longitude from input file")
     
-    
-#    # update lat values:
-#    lat = np.ma.array(
-#        np.zeros((np.shape(lat_temp)[0]+2, np.shape(lat_temp)[1]+2)),
-#        mask=False
-#    )
-#    lat[1:-1,1:-1] = lat_temp
-#    lat[0,:] = lat[1,:]-(lat[2,:]-lat[1,:])
-#    lat[-1,:] = lat[-2,:] + (lat[-2,:]-lat[-3,:])
-#    lat[:,0] = lat[:,1]-(lat[:,2]-lat[:,1])
-#    lat[:,-1] = lat[:,-2] + (lat[:,-2]-lat[:,-3])
-    lat_temp.mask[lat_temp < -90] = True
+    # Get or create mask
 
-    lat = lat_temp
-
-    # update lon values:
-#    lon = np.ma.array(
-#        np.zeros((np.shape(lon_temp)[0]+2, np.shape(lon_temp)[1]+2)),
-#        mask=False
-#    )
-#    lon[1:-1,1:-1] = lon_temp
-#    lon[0,:] = lon[1,:]-(lon[2,:]-lon[1,:])
-#    lon[-1,:] = lon[-2,:] + (lon[-2,:]-lon[-3,:])
-#    lon[:,0] = lon[:,1]-(lon[:,2]-lon[:,1])
-#    lon[:,-1] = lon[:,-2] + (lon[:,-2]-lon[:,-3])
-    lon_temp.mask[lon_temp < -180] = True
-
-    lon = lon_temp
+    mask = utils.get_or_create_region_mask(region, lat, lon, "CRR", buffer_km=500)
 
     # Read in data
-    data_temp = CRR_in.variables[var][:,:]
+    data = CRR_in.variables[var][:,:]
+    data = np.where(mask, data, 0)
 
     # Should be no need to loop over times or levels as CRR data files are always 1 per satellite image on a single level.
     try:
@@ -607,8 +568,8 @@ def read_data_from_CRR_backup(file_path, var, contour_dict, level_dict):
         rec_sigma = 1.5
 
     # Max and min values in data
-    max_int_data = np.ceil(np.nanmax(data_temp))
-    min_int_data = np.floor(np.nanmin(data_temp))
+    max_int_data = np.ceil(np.nanmax(data))
+    min_int_data = np.floor(np.nanmin(data))
 
     # Define LEVELS and THRESHOLDS (not actual max min values, just to et approriate values for data to be added to extra frame around data.
     CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
@@ -616,36 +577,16 @@ def read_data_from_CRR_backup(file_path, var, contour_dict, level_dict):
     try:
         # Check if any mandatory satellite data is missing
         crr_conditions = CRR_in.variables["crr_conditions"][:,:]
-        idx_temp = np.where((crr_conditions > 8900) & (crr_conditions < 9020), 1, 0)
-        # Fill in empty frame around data with zeros
-        idx = np.zeros((np.shape(idx_temp)[0]+2, np.shape(idx_temp)[1]+2))
-        idx[1:-1,1:-1] = idx_temp
-        missing_contours = measure.find_contours(idx, level=0.5)
+        idx = np.where((crr_conditions > 8900) & (crr_conditions < 9020), 1, 0)
         missing_sat_data = any([len(i)>0 for i in idx])
     except IndexError as e:
         missing_sat_data = False
 
     if missing_sat_data:
-        coords_list = []
-        for i, ctr in enumerate(missing_contours):
-            coords, out_of_bounds = get_contour_coords(ctr, lat, lon)
-            coords_s = simplify_coords(coords, 0.25)
-            coords_list.append(coords_s)
-        missing_data_feature = create_feature("missing_data", coords_list)
+        missing_data_feature = contouring_par.create_missing_data_feature(idx, lat, lon, max_workers)
     else:
         missing_data_feature = None
 
-#    # Fill variables in empty frame around data with the current lowest value in the dataset
-#    data_min = np.amin(data_temp)
-#    edge_list = list(data_temp[0,:])+list(data_temp[-1,:])+list(data_temp[:,0])+list(data_temp[:,-1])
-#    edge_min = np.amin(edge_list)
-#    data_step = THRESHOLDS[1]-THRESHOLDS[0]
-#    data = np.zeros((np.shape(data_temp)[0]+2, np.shape(data_temp)[1]+2))
-#    data[ data == 0.0 ] =  edge_min - data_step
-#    data[1:-1,1:-1] = data_temp
-#    data[data>50.0] = 0.0
-
-    data = data_temp
     data[data>50.0] = 0.0
 
     entry_name = "entry000" #each CRR file only contains a single time/level so there is only ever 1 entry
@@ -658,166 +599,27 @@ def read_data_from_CRR_backup(file_path, var, contour_dict, level_dict):
     CRR_in.close()
 
     return data_dict
-
-def read_data_from_CRR(file_path, var, contour_dict, level_dict):
-    """
-#   Get concentration data from CRR netcdf input file
-#
-#   Parameters
-#   ----------
-#   file_path : str
-#       Input file path
-#   var : str
-#       NetCDF variable to extract
-#   contour_dict: dictionary
-#       Information about the contour levels that have (or haven't) been supplied as arguments
-#   level_dict : dictionary
-#       Information about the level
-#
-#   Returns
-#   -------
-#   data_dict: dictionary
-#       Dictionary of variable values, latitudes, longitudes and metadata
-#
-    """
-
-    from netCDF4 import Dataset
-    from datetime import datetime, timedelta
-    from scipy.spatial import ConvexHull
-    from skimage import measure
-
-    # create data dictionary 
-    data_dict = {}
-
-    # Read input data
-    CRR_in= Dataset(file_path, "r")
-
-    if CRR_in.product_name == "CRR":
-        # Read times
-        nominal_product_time = datetime.strptime(CRR_in.nominal_product_time, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d_%H:%M:%S")
-        time_coverage_start = datetime.strptime(CRR_in.time_coverage_start, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d_%H:%M:%S")
-        time_coverage_end = datetime.strptime(CRR_in.time_coverage_end, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d_%H:%M:%S")
-    elif CRR_in.product_name == "EXIM":
-        #Read times
-        nominal_product_time = (datetime.strptime(CRR_in.nominal_product_time.split("_")[0], "%Y-%m-%dT%H:%M:%SZ")+timedelta(minutes=int(CRR_in.nominal_product_time.split("_")[1]))).strftime("%Y-%m-%d_%H:%M:%S")
-        time_coverage_start = (datetime.strptime(CRR_in.time_coverage_start.split("_")[0], "%Y-%m-%dT%H:%M:%SZ")+timedelta(minutes=int(CRR_in.time_coverage_start.split("_")[1]))).strftime("%Y-%m-%d_%H:%M:%S")
-        time_coverage_end = (datetime.strptime(CRR_in.time_coverage_end.split("_")[0], "%Y-%m-%dT%H:%M:%SZ")+timedelta(minutes=int(CRR_in.time_coverage_end.split("_")[1]))).strftime("%Y-%m-%d_%H:%M:%S")
-
-    # Read in lat and lon values
-    if "lat" in CRR_in.variables.keys():
-        lat_temp = CRR_in.variables["lat"][:]
-    if "lon" in CRR_in.variables.keys():
-        lon_temp = CRR_in.variables["lon"][:]
-    if lat_temp is None or lon_temp is None:
-        raise ValueError("Could not get latitude/longitude from input file")
-
-    # update lat values:
-#    lat = np.ma.array(
-#        np.zeros((np.shape(lat_temp)[0]+2, np.shape(lat_temp)[1]+2)),
-#        mask=False
-#    )
-#    lat[1:-1,1:-1] = lat_temp
-#    lat[0,:] = lat[1,:]-(lat[2,:]-lat[1,:])
-#    lat[-1,:] = lat[-2,:] + (lat[-2,:]-lat[-3,:])
-#    lat[:,0] = lat[:,1]-(lat[:,2]-lat[:,1])
-#    lat[:,-1] = lat[:,-2] + (lat[:,-2]-lat[:,-3])
-    
-#    lat_temp.mask[lat_temp < -90] = True
-    lat = lat_temp
-
-    # update lon values:
-#    lon = np.ma.array(
-#        np.zeros((np.shape(lon_temp)[0]+2, np.shape(lon_temp)[1]+2)),
-#        mask=False
-#    )
-#    lon[1:-1,1:-1] = lon_temp
-#    lon[0,:] = lon[1,:]-(lon[2,:]-lon[1,:])
-#    lon[-1,:] = lon[-2,:] + (lon[-2,:]-lon[-3,:])
-#    lon[:,0] = lon[:,1]-(lon[:,2]-lon[:,1])
-#    lon[:,-1] = lon[:,-2] + (lon[:,-2]-lon[:,-3])
-#    lon.mask[lon < -180] = True
-
-#    lon_temp.mask[lon_temp < -180] = True
-    lon = lon_temp
-
-    # Read in data
-    data_temp = CRR_in.variables[var][:,:]
-
-    # Should be no need to loop over times or levels as CRR data files are always 1 per satellite image on a single level.
-    try:
-        units = CRR_in.variables[var].units
-    except:
-        units = "undefined"
-
-    satellite_id = CRR_in.satellite_identifier
-    region_id = CRR_in.region_id
-    level_type = "Single"
-    dx = float(CRR_in.spatial_resolution)
-    dx_units = "km"
-
-    if dx < 20:
-        if dx >= 1:
-            rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1.0)
-        else:
-            rec_sigma = 5.0
-    else:
-        rec_sigma = 1.5
-
-    # Max and min values in data
-    max_int_data = np.ceil(np.nanmax(data_temp))
-    min_int_data = np.floor(np.nanmin(data_temp))
-
-    # Define LEVELS and THRESHOLDS (not actual max min values, just to et approriate values for data to be added to extra frame around data.
-    CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
-
-    missing_data_feature = None
-
-#    # Fill variables in empty frame around data with the current lowest value in the dataset
-#    data_min = np.amin(data_temp)
-#    edge_list = list(data_temp[0,:])+list(data_temp[-1,:])+list(data_temp[:,0])+list(data_temp[:,-1])
-#    edge_min = np.amin(edge_list)
-#    data_step = THRESHOLDS[1]-THRESHOLDS[0]
-#    data = np.zeros((np.shape(data_temp)[0]+2, np.shape(data_temp)[1]+2))
-#    data[ data == 0.0 ] =  edge_min - data_step
-#    data[1:-1,1:-1] = data_temp
-#    data[data>50.0] = 0.0
-
-    data = data_temp
-    data[data>50.0] = 0.0
-
-
-    entry_name = "entry000" #each CRR file only contains a single time/level so there is only ever 1 entry
-    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': satellite_id, 'time_coverage_start': time_coverage_start, 'time_coverage_end': time_coverage_end, 'nominal_product_time' : nominal_product_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
-    # Add missing data, if available:
-    if missing_data_feature:
-        data_dict[entry_name]['metadata']['missing_data'] = missing_data_feature
-
-    # Close wrf_in file
-    CRR_in.close()
-
-    return data_dict
-
 
 def read_data_from_NCASradar(file_path, var, contour_dict, level_dict):
     """
-#   Get horizontal data from NCAS mobile radars where data has been written to cfradial format
-#
-#   Parameters
-#   ----------
-#   file_path : str
-#       Input file path
-#   var : str
-#       NetCDF variable to extract (dBZ is expected)
-#   contour_dict: dictionary
-#       Information about the contour levels that have (or haven't) been supplied as arguments
-#   level_dict : dictionary
-#       Information about the level
-#
-#   Returns
-#   -------
-#   data_dict: dictionary
-#       Dictionary of variable values, latitudes, longitudes and metadata
-#
+    Get horizontal data from NCAS mobile radars where data has been written to cfradial format
+ 
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract (dBZ is expected)
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+    level_dict : dictionary
+        Information about the level
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
     """
 
     import pyart
@@ -879,49 +681,95 @@ def read_data_from_NCASradar(file_path, var, contour_dict, level_dict):
 
     return data_dict
 
+def process_single_MTG_LI_file_with_args(args):
+    """
+    Worker function to read data from MTG)LI files. Due to frequency of file production (1 every 30 seconds) many files a needed to be read
+    for a single accumulation period. Readin the files in parallel allows for some speedup.
+
+    Parameters
+    ----------
+    fil : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    mask: array
+        region of interest mask so that only information that is required is gathered.
+
+    Returns
+    -------
+    result: array
+        data from a single file to be combined with other files being read in parallel.
+
+    """
+
+    from satpy import Scene
+    import numpy as np
+
+    fil, var, mask = args
+
+    scn = Scene(filenames=[fil], reader="li_l2_nc")
+    scn.load([var])
+
+    scn_values = np.where(mask, scn[var].values, 0)
+    
+    if var == "accumulated_flash_area":
+        valid_mask = np.isfinite(scn_values) & (scn_values > 0)
+        result = np.zeros_like(scn_values)
+        result[valid_mask] = 1
+    else:
+        valid_mask = np.isfinite(scn_values)
+        result = np.zeros_like(scn_values)
+        result[valid_mask] = scn_values[valid_mask]
+
+    return result
 
 def read_data_from_MTG_LI_ACC(file_path, var, contour_dict, level_dict):
-    '''
-#   Get horizontal data from Meteosat Third Generation Lightning Imager accumulated/gridded products.
-#
-#   Parameters
-#   ----------
-#   file_path : string
-#       path of file to be read in (latest of the accumulation period).
-#   var : str
-#       NetCDF variable to extract ("flash_radiance", "flash_accumulation", "accumulated_flash_area")
-#   contour_dict: dictionary
-#       Information about the contour levels that have (or haven't) been supplied as arguments
-#   level_dict : dictionary
-#       Information about the level
-#
-#   Returns
-#   -------
-#   data_dict: dictionary
-#       Dictionary of variable values, latitudes, longitudes and metadata
-#
-    '''
+    """
+    Get horizontal data from Meteosat Third Generation Lightning Imager accumulated/gridded products.
+ 
+    Parameters
+    ----------
+    file_path : string
+        path of file to be read in (latest of the accumulation period).
+    var : str
+        NetCDF variable to extract ("flash_radiance", "flash_accumulation", "accumulated_flash_area")
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+    level_dict : dictionary
+        Information about the level
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
+    """
 
     from satpy.scene import Scene
     from satpy import find_files_and_readers
     import yaml
     import os
     import datetime
+    import geopandas as gpd
+    import pyproj
+    from shapely.ops import transform
+    from shapely.geometry import Polygon, MultiPolygon
+    from matplotlib.path import Path
+    import matplotlib.pyplot as plt
+    from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor
 
     # create data dictionary
     data_dict = {}
 
-# Read the MTG_LI_config.yml file to retrieve the accumulation period in minutes and the limits of the box to be processed. A box that is
+    # Read the MTG_LI_config.yml file to retrieve the accumulation period in minutes and the limits of the box to be processed. A box that is
     with open('MTG_LI_config.yml', 'r') as file:
         config = yaml.safe_load(file)
 
     accum_mins = int(config['MTG_LI_reader_config']['accum_mins'])
-    ll_lat = float(config['MTG_LI_reader_config']['ll_lat'])
-    ll_lon = float(config['MTG_LI_reader_config']['ll_lon'])
-    ur_lat = float(config['MTG_LI_reader_config']['ur_lat'])
-    ur_lon = float(config['MTG_LI_reader_config']['ur_lon'])
+    region = config['MTG_LI_reader_config']['region']
 
-# using the file name work out the start and end times
+    # Using the file name work out the start and end times
     file_basename = os.path.basename(file_path)
     diri = os.path.dirname(file_path)
 
@@ -932,90 +780,72 @@ def read_data_from_MTG_LI_ACC(file_path, var, contour_dict, level_dict):
     start_time = datetime.datetime(int(latest_datetime[0:4]), int(latest_datetime[4:6]), int(latest_datetime[6:8]), int(latest_datetime[8:10]), int(latest_datetime[10:12]), int(latest_datetime[12:14])) - datetime.timedelta(minutes=int(accum_mins)) + datetime.timedelta(seconds=1)
     time_coverage_start = start_time.strftime("%Y-%m-%d_%H:%M:%S")
 
-    my_files = find_files_and_readers(base_dir=diri, start_time=start_time, end_time=end_time, reader="li_l2_nc")["li_l2_nc"]
+    if var == "accumulated_flash_area":
+        var_str = "-AFA--"
+    if var == "flash_accumulation":
+        var_str = "-AF--"
+    if var == "flash_radiance":
+        var_str = "-AFR--"
+        
+    my_files_temp = find_files_and_readers(base_dir=diri, start_time=start_time, end_time=end_time, reader="li_l2_nc")["li_l2_nc"]
+    my_files = []
+    for fil in my_files_temp:
+        if var_str in fil:
+           my_files.append(fil)
+ 
     expected_num_files = accum_mins * 2
     if len(my_files) == expected_num_files:
         print("All expected files are present!")
     else:
         print("Warning: The number of files read does not match the expected number.")
 
+    # Gather important information from the first listed file to allow proper processing of the rest
+    initial_scn = Scene(filenames=[my_files[0]], reader="li_l2_nc")
+    initial_scn.load([var])
+    lat_lon = np.array(initial_scn[var].attrs['area'].get_lonlats())
+    satellite_id = initial_scn[var].attrs['grid_mapping']
+    full_lat = lat_lon[1]
+    full_lon = lat_lon[0]
 
-    for i, fil in enumerate(my_files):
-        scn = Scene(filenames=[fil], reader="li_l2_nc")
-        scn.load([var])
+    lat_diff = np.abs((full_lat[int(np.shape(full_lat)[0]/2),int(np.shape(full_lat)[1]/2)] - full_lat[int(np.shape(full_lat)[0]/2),int(np.shape(full_lat)[1]/2)+1]) * 110.948)
+    lon_diff = np.abs((full_lon[int(np.shape(full_lat)[0]/2),int(np.shape(full_lat)[1]/2)] - full_lon[int(np.shape(full_lat)[0]/2)+1,int(np.shape(full_lat)[1]/2)]) * 110.948 * np.cos(np.deg2rad(full_lat[int(np.shape(full_lat)[0]/2),int(np.shape(full_lat)[1]/2)])))
 
-        if i == 0:
-            satellite_id = scn[var].attrs['grid_mapping']
-            # get full file lat and lon values
-            lat_lon = np.array(scn[var].attrs['area'].get_lonlats())
-            full_lat = lat_lon[1]
-            full_lon = lat_lon[0]
+    dx = round(((lat_diff + lon_diff)/2.0)*10.0)/10.0
+    dx_units = "km"
 
-            for j in np.arange(0, np.shape(full_lat)[0], 1):
-                lat_slice = full_lat[:,j]
-                if np.all(np.isinf(lat_slice)):
-                    lat_slice = np.linspace(85.0, -85.0, len(lat_slice), endpoint=True)
-                    full_lat[:,j] = lat_slice
-                else:
-                    valid_indices = np.where(~np.isinf(lat_slice))[0]
-                    inf_indices = np.where(np.isinf(lat_slice))[0]
+    if dx < 20:
+        if dx >= 1:
+            rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1.0)
+        else:
+            rec_sigma = 5.0
+    else:
+        rec_sigma = 1.5
 
-                    lat_slice[0:np.min(valid_indices)] = np.linspace(85.0, lat_slice[np.min(valid_indices)], len(lat_slice[0:np.min(valid_indices)]), endpoint=False)
-                    start_val = lat_slice[np.max(valid_indices)] + (lat_slice[np.max(valid_indices)] - lat_slice[np.max(valid_indices)-1])
-                    lat_slice[np.max(valid_indices)+1:np.max(inf_indices)+1] = np.linspace(start_val, -85.0, len(lat_slice[np.max(valid_indices)+1:np.max(inf_indices)+1]), endpoint = True)
-                    full_lat[:,j] = lat_slice
+    data = np.zeros_like(full_lat)
+    mask = utils.get_or_create_region_mask(region, full_lat, full_lon, "MTG_LI")
 
-            for j in np.arange(0, np.shape(full_lat)[1], 1):
-                lon_slice = full_lon[j,:]
-                if np.all(np.isinf(lon_slice)):
-                    lon_slice = np.linspace(-85.0, 85.0, len(lon_slice), endpoint=True)
-                    full_lon[j,:] = lon_slice
-                else:
-                    valid_indices = np.where(~np.isinf(lon_slice))[0]
-                    inf_indices = np.where(np.isinf(lon_slice))[0]
+    # Launch parallel processing to read all the files in the my_files list
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        args_list = [(f, var, mask) for f in my_files]
+        results = list(executor.map(process_single_MTG_LI_file_with_args, args_list))
 
-                    lon_slice[0:np.min(valid_indices)] = np.linspace(-85.0, lon_slice[np.min(valid_indices)], len(lon_slice[0:np.min(valid_indices)]), endpoint=False)
-                    start_val = lon_slice[np.max(valid_indices)] + (lon_slice[np.max(valid_indices)] - lon_slice[np.max(valid_indices)-1])
-                    lon_slice[np.max(valid_indices)+1:np.max(inf_indices)+1] = np.linspace(start_val, 85.0, len(lon_slice[np.max(valid_indices)+1:np.max(inf_indices)+1]), endpoint = True)
-                    full_lon[j,:] = lon_slice
-
-            # find indices of ll and ur corners
-            ll_index1, ll_index2 = find_indices(ll_lat, ll_lon, full_lat, full_lon)
-            ur_index1, ur_index2 = find_indices(ur_lat, ur_lon, full_lat, full_lon)
-            # calculate index ranges
-            index1_range = np.abs(ur_index1 - ll_index1) + 1
-            index2_range = np.abs(ur_index2 - ll_index2) + 1
-            # create flash data and subset lat lon arrays
-            data = np.zeros((index1_range, index2_range))
-            lat = full_lat[ur_index1:ll_index1+1, ll_index2:ur_index2+1]
-            lon = full_lon[ur_index1:ll_index1+1, ll_index2:ur_index2+1]
-
-            lat_diff = np.abs((lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)] - lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)+1]) * 110.948)
-            lon_diff = np.abs((lon[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)] - lon[int(np.shape(lat)[0]/2)+1,int(np.shape(lat)[1]/2)]) * 110.948 * np.cos(np.deg2rad(lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)])))
-
-            dx = round(((lat_diff + lon_diff)/2.0)*10.0)/10.0
-            dx_units = "km"
-
-            if dx < 20:
-                if dx >= 1:
-                    rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1.0)
-                else:
-                    rec_sigma = 5.0
-            else:
-                rec_sigma = 1.5
-
-        scn_values = scn[var].values[ur_index1:ll_index1+1,ll_index2:ur_index2+1]
-        if var == "accumulated_flash_area":
-            valid_mask = np.isfinite(scn_values) & (scn_values > 0)
+    # Depending on the variable being read accumulate the read variable properly
+    if var == "accumulated_flash_area":
+        for result in results:
+            valid_mask = np.isfinite(result) & (result > 0)
             data[valid_mask] = 1
             units = "no units"
-        else:
-            valid_mask = np.isfinite(scn_values)
-            data[valid_mask] += scn_values[valid_mask]
+    else:
+        for result in results:
+            valid_mask = np.isfinite(result)
+            data[valid_mask] += result[valid_mask]
             if var == "flash_radiance":
                 units = "mW.m-2.sr-1"
             elif var == "flash_accumulation":
                 units = "flashes/pixel"
+
+    lat = full_lat
+    lon = full_lon
 
     entry_name = "entry000"
 
@@ -1025,25 +855,26 @@ def read_data_from_MTG_LI_ACC(file_path, var, contour_dict, level_dict):
 
 def read_UM_data_h(file_path, var, contour_dict, level_dict):
     """
-#   Use cfpython to read UM files and interpolate to a specific height level
-#
-#   Parameters
-#   ----------
-#   file_path : str
-#       Input file path
-#   var : str
-#       variable to extract (if reading UM data then this is the stash code)
-#   contour_dict : dictionary
-#       Dictionary that provides information on contours
-#   level_dict : dictionary
-#       Dictionary that provides information on pressure level
-#
-#   Returns
-#   -------
-#   list
-#       List comprising of data, latitudes, longitudes and file
-#       metadata
-#
+    Use cfpython to read UM files and interpolate to a specific height level
+    WORK IN PROGRESS
+ 
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        variable to extract (if reading UM data then this is the stash code)
+    contour_dict : dictionary
+        Dictionary that provides information on contours
+    level_dict : dictionary
+        Dictionary that provides information on pressure level
+ 
+    Returns
+    -------
+    list
+        List comprising of data, latitudes, longitudes and file
+        metadata
+ 
     """
 
     import cf
@@ -1287,14 +1118,10 @@ def read_UM_data_h(file_path, var, contour_dict, level_dict):
         subset_z = z[:,lat_indices.min():lat_indices.max()+1, lon_indices.min():lon_indices.max()+1]
 
         var_data = subset_var_data
-        lat_temp = subset_lat_temp
-        lon_temp = subset_lon_temp
+        lat = subset_lat_temp
+        lon = subset_lon_temp
         z = subset_z
 
-        print(np.shape(var_data))
-        print(np.shape(lat_temp))
-        print(np.shape(lon_temp))
-        print(np.shape(z))
 
     # Interpolate onto height levels
 
@@ -1322,51 +1149,23 @@ def read_UM_data_h(file_path, var, contour_dict, level_dict):
     time = var_data.dimension_coordinate("time").datetime_array
     time_str = [t.strftime("%Y-%m-%d %H:%M:%S") for t in time]
 
-    data_temp = np.zeros((np.shape(var_array)[time_index], 1, np.shape(var_array)[y_index], np.shape(var_array)[x_index]), dtype=float)
+    data_all = np.zeros((np.shape(var_array)[time_index], 1, np.shape(var_array)[y_index], np.shape(var_array)[x_index]), dtype=float)
 
     for i in np.arange(0, np.shape(var_array)[time_index], 1):
-        data_temp[i,0,:,:] = interplevel(var_array[i,:,:,:], z_array[:,:,:], level_dict["level_id"])
+        data_all[i,0,:,:] = interplevel(var_array[i,:,:,:], z_array[:,:,:], level_dict["level_id"])
 
     # Max and min values in data
-    max_int_data = np.ceil(np.nanmax(data_temp))
-    min_int_data = np.floor(np.nanmin(data_temp))
+    max_int_data = np.ceil(np.nanmax(data))
+    min_int_data = np.floor(np.nanmin(data))
 
     # Define LEVELS and THRESHOLDS (not actual max min values, just to et approriate values for data to be added to extra frame around data.
     CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
 
     # Add additional frame around where data is present and populate with lat and lon values using finite difference approach
     
-    lat = lat_temp
-    lon = lon_temp
-    '''
-    lat = np.zeros((np.shape(lat_temp)[0]+2, np.shape(lat_temp)[1]+2))
-    lat[1:-1,1:-1] = lat_temp
-    lat[0,:] = lat[1,:]-(lat[2,:]-lat[1,:])/2
-    lat[-1,:] = lat[-2,:] + (lat[-2,:]-lat[-3,:])/2
-    lat[:,0] = lat[:,1]-(lat[:,2]-lat[:,1])/2
-    lat[:,-1] = lat[:,-2] + (lat[:,-2]-lat[:,-3])/2
-
-    lon = np.zeros((np.shape(lon_temp)[0]+2, np.shape(lon_temp)[1]+2))
-    lon[1:-1,1:-1] = lon_temp
-    lon[0,:] = lon[1,:]-(lon[2,:]-lon[1,:])/2
-    lon[-1,:] = lon[-2,:] + (lon[-2,:]-lon[-3,:])/2
-    lon[:,0] = lon[:,1]-(lon[:,2]-lon[:,1])/2
-    lon[:,-1] = lon[:,-2] + (lon[:,-2]-lon[:,-3])/2
-    '''
-
     for i in np.arange(0, np.shape(var_array)[time_index], 1):
-        '''
-        # Fill variables in empty frame around data with the current lowest value in the dataset
-        data_min = np.amin(data_temp)
-        edge_list = list(data_temp[0,:])+list(data_temp[-1,:])+list(data_temp[:,0])+list(data_temp[:,-1])
-        edge_min = np.amin(edge_list)
-        data_step = THRESHOLDS[1]-THRESHOLDS[0]
-        data = np.zeros((np.shape(data_temp)[2]+2, np.shape(data_temp)[3]+2))
-        data[ data == 0.0 ] =  edge_min - data_step
-        data[1:-1,1:-1] = data_temp[i,0,:,:]
-        '''
 
-        data = data_temp
+        data = data_all[i,0,:,:]
 
         entry_name = f"entry{i:03d}"
         data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'valid_time': time_str[i], 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}

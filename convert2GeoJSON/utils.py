@@ -33,6 +33,8 @@ def input_args():
     parser.add_argument('--contour_method', type=str, help='Choice of contour creation method e.g. standard or pixel')
     parser.add_argument('--parallel', action='store_true', help='A flag to parallel processing using tiling of data')
     parser.add_argument('--num_workers', type=numeric_type, help='Number of workers processing tiles in parallel')
+    parser.add_argument('--simplify', action='store_true', help='A flag to denote whether polygons are to be simplified once created')
+    parser.add_argument('--tolerance', type=numeric_type, help='Value to denote the level of polygon simplification default value of 0.005')
 
     args = parser.parse_args()
 
@@ -122,6 +124,20 @@ def input_args():
     else:
         parallel_dict["max_workers"] = 0 # Not actually 0 but the data will be processed in serial without tiling.
 
+    # Create and populate simpification dictionay
+    simplify_dict = {}
+   
+    if args.simplify:
+        simplify_dict["simplify_flag"] = True
+        if args.tolerance:
+            simplify_dict["tolerance"] = args.tolerance
+        else:
+            print("No value has been selected for simplification tolerance, a defualt value of 0.005 will be used.")
+            simplify_dict["tolerance"] = 0.005
+
+    else:
+        simplify_dict["tolerance"] = 0.0
+
     # If colors have been explicitly defined add the palette to the contour dictionary
     if args.colors:
         contour_dict["color_pal"] = args.colors
@@ -154,7 +170,7 @@ def input_args():
     if args.level:
         level_dict["level_id"] = args.level
 
-    return args.input_file, args.output_dir, args.var_name, args.source, smooth_dict, contour_dict, level_dict, parallel_dict
+    return args.input_file, args.output_dir, args.var_name, args.source, smooth_dict, contour_dict, level_dict, parallel_dict, simplify_dict
 
 
 def numeric_type(value):
@@ -179,28 +195,6 @@ def numeric_type(value):
             return float(value)
         except ValueError:
             raise argparse.ArgumentTypeError(f"Invalid numeric value: {value}")
-
-def format_float(x):
-    """
-    Reduce precision of values to be stored as GeoJSON.
-
-    Parameters
-    ----------
-    x : float
-        Numeric value
-    precision : integer
-        Number of digits after decimal point to retain
-
-    Returns
-    -------
-    float
-        Float value with specified precision.
-
-    """
-
-    fmt_str = '{{:.{}f}}'.format(3)
-
-    return float(fmt_str.format(x))
 
 def simplify_coords(coords, tolerance):
     """
@@ -379,8 +373,8 @@ def generate_contours(contour_dict, max_val, min_val):
     if not contour_dict["contours_set"]:
         for i in np.arange(start, stop+interval, interval):
             contour_name = f"{i}_{i + interval}"
-            threshold_value = i
-            thresholds.append(threshold_value)
+            threshold_value = float(i)
+            thresholds.append(float(threshold_value))
             if i != stop:
                 contours.append(contour_name)
     else:
@@ -424,3 +418,76 @@ def create_color_palette(contours,colormap):
     hex_palette = dict(zip(range(len(hex_colors)), hex_colors))
 
     return hex_palette
+
+def get_or_create_region_mask(region_name, lat, lon, reader_id, buffer_km=50, mask_dir="masks"):
+    """
+    Returns a cached or newly generated boolean mask for a given region.
+
+    Parameters:
+        region_name (str): Unique name for region, e.g., "Africa"
+        lat (ndarray): 2D latitude array
+        lon (ndarray): 2D longitude array
+        buffer_km (float): Buffer around region in km
+        mask_dir (str): Directory to store/read cached masks
+
+    Returns:
+        mask (ndarray): Boolean array of same shape as lat/lon
+    """
+
+    import os
+    import geopandas as gpd
+    from shapely.geometry import Point
+    from shapely.ops import transform
+    import pyproj
+    import matplotlib.pyplot as plt
+
+
+    os.makedirs(mask_dir, exist_ok=True)
+    mask_path = os.path.join(mask_dir, f"{reader_id}_{region_name}_buffer{buffer_km}km.npy")
+
+    if os.path.exists(mask_path):
+        print(f"✅ Using cached mask from: {mask_path}")
+        return np.load(mask_path)
+
+    print(f"⚙️  Creating new mask for region: {region_name}")
+
+    shp = gpd.read_file("data/ne_110m_admin_0_countries.shp")
+
+    region = shp[shp["CONTINENT"].str.lower() == region_name.lower()]
+    if region.empty:
+        region = shp[shp["NAME"].str.lower() == region_name.lower()]
+
+    if region.empty:
+
+        shp = gpd.read_file("data/10m_cultural/ne_10m_admin_0_countries.shp")
+
+        region = shp[shp["CONTINENT"].str.lower() == region_name.lower()]
+        if region.empty:
+            region = shp[shp["NAME"].str.lower() == region_name.lower()]
+
+    if region.empty:
+
+        raise ValueError(f"Region '{region_name}' not found in continent or country list.")
+
+    # Combine geometries (handles MultiPolygon) and apply buffer
+    region_poly = region.unary_union
+    to_m = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True).transform
+    to_deg = pyproj.Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True).transform
+    buffered = transform(to_m, region_poly).buffer(buffer_km * 1000)
+    buffered_latlon = transform(to_deg, buffered)
+
+    # Flatten 2D lat/lon arrays to list of points
+    flat_lat = lat.ravel()
+    flat_lon = lon.ravel()
+    mask_flat = np.array([
+        buffered_latlon.contains(Point(x, y)) if np.isfinite(x) and np.isfinite(y) else False
+        for x, y in zip(flat_lon, flat_lat)
+    ])
+
+    # Reshape back to 2D mask
+    mask = mask_flat.reshape(lat.shape)
+
+    np.save(mask_path, mask)
+    print(f"💾 Mask saved to: {mask_path}")
+    return mask
+

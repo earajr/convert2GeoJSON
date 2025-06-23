@@ -3,18 +3,38 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 def generate_test_data(shape=(350, 350), value_range=(0, 50.0), entry_name="entry000", seed=42):
+    """
+    Generates place holder test data with sufficient complexity to act as a test dataset for testing other components.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the test data being generated, default value of 350x350
+    value_range: tuple
+        Approximate max and min values of the test data being generated
+    entry_name: string
+        Standard entry name to spoof data being read in from a file
+    seed: integer
+        Seed to be used for random number generation.
+
+    Returns
+    -------
+    data_dict : dict
+        Dictionary of randomly generated data and metadata to spoof real data read from a file.
+    """
+
     np.random.seed(seed)
 
-    # 1. Create base field: gradient + noise
+    # Create base field: gradient + noise
     y = np.linspace(0, 1, shape[0])
     x = np.linspace(0, 1, shape[1])
     X, Y = np.meshgrid(x, y)
 
     base = (X + Y) / 2 * (value_range[1] - value_range[0])
-    noise = np.random.rand(*shape) * 5
+    noise = np.random.rand(*shape) * 10
     values = base + noise
 
-    # 2. Add high-value islands (e.g., storms or peaks)
+    # Add high-value islands (e.g., storms or peaks)
     for _ in range(3):
         cx, cy = np.random.randint(50, 250, size=2)
         radius = np.random.randint(10, 30)
@@ -25,7 +45,7 @@ def generate_test_data(shape=(350, 350), value_range=(0, 50.0), entry_name="entr
         blob = gaussian_filter(blob, sigma=5)
         values += blob
 
-    # 3. Add low-value pockets (e.g., depressions)
+    # Add low-value pockets (e.g., depressions)
     for _ in range(3):
         cx, cy = np.random.randint(50, 250, size=2)
         radius = np.random.randint(10, 30)
@@ -36,42 +56,18 @@ def generate_test_data(shape=(350, 350), value_range=(0, 50.0), entry_name="entr
         blob = gaussian_filter(blob, sigma=5)
         values += blob
 
-    # 4. Clip values to range
+    # Clip values to range
     values_temp = np.clip(values, value_range[0], value_range[1])
 
-    # 5. Create curvilinear lat/lon arrays (simulate map projection warp)
+    # Create curvilinear lat/lon arrays (simulate map projection warp)
     lat_temp = np.linspace(-10, 10, shape[0])[:, None] + 0.05 * np.sin(2 * np.pi * X)
     lon_temp = np.linspace(100, 120, shape[1])[None, :] + 0.05 * np.cos(2 * np.pi * Y)
-
-#    # Add additional frame around where data is present and populate with lat and lon values using finite difference approach
-#
-#    lat = np.zeros((np.shape(lat_temp)[0]+2, np.shape(lat_temp)[1]+2))
-#    lat[1:-1,1:-1] = lat_temp
-#    lat[0,:] = lat[1,:]-(lat[2,:]-lat[1,:])
-#    lat[-1,:] = lat[-2,:] + (lat[-2,:]-lat[-3,:])
-#    lat[:,0] = lat[:,1]-(lat[:,2]-lat[:,1])
-#    lat[:,-1] = lat[:,-2] + (lat[:,-2]-lat[:,-3])
-#
-#    lon = np.zeros((np.shape(lon_temp)[0]+2, np.shape(lon_temp)[1]+2))
-#    lon[1:-1,1:-1] = lon_temp
-#    lon[0,:] = lon[1,:]-(lon[2,:]-lon[1,:])
-#    lon[-1,:] = lon[-2,:] + (lon[-2,:]-lon[-3,:])
-#    lon[:,0] = lon[:,1]-(lon[:,2]-lon[:,1])
-#    lon[:,-1] = lon[:,-2] + (lon[:,-2]-lon[:,-3])
-#
-#    # Fill variables in empty frame around data with the current lowest value in the dataset
-#    edge_list = list(values_temp[0,:])+list(values_temp[-1,:])+list(values_temp[:,0])+list(values_temp[:,-1])
-#    edge_min = np.amin(edge_list)
-#    values_step = 0.5
-#    values = np.zeros((np.shape(values_temp)[0]+2, np.shape(values_temp)[1]+2))
-#    values[ values == 0.0 ] =  edge_min - values_step
-#    values[1:-1,1:-1] = values_temp
 
     values = values_temp
     lat = lat_temp
     lon = lon_temp
 
-    # 5. Fill metadata with dummy values
+    # Fill metadata with dummy values
     now = datetime.datetime.utcnow()
     metadata = {
         'varname': "synthetic_var",
@@ -85,7 +81,7 @@ def generate_test_data(shape=(350, 350), value_range=(0, 50.0), entry_name="entr
         'sigma': 1.0
     }
 
-    # 6. Build dictionary
+    # Build dictionary
     data_dict = {
         entry_name: {
             'values': values,

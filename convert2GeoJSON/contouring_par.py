@@ -1,10 +1,41 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
-from shapely.geometry import Polygon, mapping, MultiPolygon, LineString
+from shapely import within
+from shapely.geometry import Polygon, mapping, MultiPolygon, LineString, LinearRing
 from shapely.ops import polygonize
 from shapely.geometry.polygon import orient
 from concurrent.futures import ProcessPoolExecutor
+from shapely.strtree import STRtree
+
+def simplify_coords(poly, tolerance):
+    """
+    Simplify the geometry and return a list of simplified coordinate lists.
+
+    Parameters
+    ----------
+    poly : Polygon or MultiPolygon
+    tolerance : float
+        Simplification tolerance
+
+    Returns
+    -------
+    list of list of [x, y] coordinates (one list per polygon exterior)
+    """
+
+    simplified = poly.simplify(tolerance)
+
+    coords_list = []
+
+    if isinstance(simplified, Polygon):
+        coords_list.append([list(pair) for pair in simplified.exterior.coords])
+    elif isinstance(simplified, MultiPolygon):
+        for part in simplified.geoms:
+            coords_list.append([list(pair) for pair in part.exterior.coords])
+    else:
+        raise TypeError(f"Unsupported geometry type: {type(simplified)}")
+
+    return coords_list
 
 def compute_tile_bounds(i, j, lat, lon, tile_size, overlap):
     """
@@ -133,23 +164,42 @@ def remove_duplicate_holes(polygons):
 
     final_polys = []
     rejected_polys = []
-    hole_polys = []
 
-    for poly in polygons:
-        for interior in poly.interiors:
-            hole_poly = Polygon(interior)
-            if hole_poly.is_valid and hole_poly.area > 0:
-                hole_polys.append(hole_poly)
+    candidate_polygons = polygons
+    candidate_polygons_temp = []
 
-    for poly in polygons:
-        is_duplicate = any(Polygon(poly.exterior).equals(hole) for hole in hole_polys)
-        if not is_duplicate:
-            final_polys.append(poly)
+    while True:
+        hole_polys = []
+
+        for poly in candidate_polygons:
+            for interior in poly.interiors:
+               hole_poly = Polygon(interior)
+               if hole_poly.is_valid and hole_poly.area > 0:
+                   hole_polys.append(hole_poly)
+
+        for poly in candidate_polygons:
+            is_duplicate = any(Polygon(poly.exterior).equals(hole) for hole in hole_polys)
+            if not is_duplicate:
+                final_polys.append(poly)
+            else:
+                candidate_polygons_temp.append(poly)
+
+        candidate_polygons_temp2 = []
+        for i, poly1 in enumerate(candidate_polygons_temp):
+            for interior in poly1.interiors:
+                for poly in polygons:
+                    if Polygon(poly.exterior).equals(Polygon(interior)):
+                        candidate_polygons_temp2.append(poly)
+
+        candidate_polygons_temp = candidate_polygons_temp2
+
+        if not candidate_polygons_temp:
+            break
         else:
-            rejected_polys.append(poly)
+            candidate_polygons = candidate_polygons_temp
+            candidate_polygons_temp = []
 
-    return final_polys, rejected_polys
-
+    return final_polys
 
 def get_contour_feature_data(var, lat, lon, thresholds):
     """
@@ -220,7 +270,7 @@ def get_contour_feature_data(var, lat, lon, thresholds):
         
         raw_polys = list(polygonize(segments))
         if raw_polys:
-            final_polys, _ = remove_duplicate_holes(raw_polys)
+            final_polys = remove_duplicate_holes(raw_polys)
             raw_polygons[i] = final_polys
 
     return raw_polygons
@@ -281,9 +331,7 @@ def process_tile(args):
 
     if tile_bbox_with_overlap is None or tile_bbox_core is None:
         return None
-
     else:
-
         try:
             raw_polygons = get_contour_feature_data(var_tile, lat_tile, lon_tile, thresholds)
 
@@ -331,7 +379,16 @@ def write_geojson(feature_collection, output_dir, input_file, entry, var_name, m
         json.dump(feature_collection, f)
 
 
-def generate_geojson(var, lat, lon, contours, thresholds, metadata, hex_palette, max_workers=None):
+def is_json_serializable(obj):
+    import json
+
+    try:
+        json.dumps(obj)
+        return True
+    except TypeError:
+        return False
+
+def generate_geojson(var, lat, lon, contours, thresholds, metadata, hex_palette, max_workers=None, tolerance=0.0):
     """
     Main function in the parallel contouring module, this is called from main and makes use of the other functions in the module to produce
     a GeoJSON by tiling the data before processing.
@@ -352,6 +409,10 @@ def generate_geojson(var, lat, lon, contours, thresholds, metadata, hex_palette,
     feature_collection: feature collection dictionary in a format that can easily be exported as a GeoJSON.
     """
 
+    from collections import defaultdict
+    from shapely import coverage_union_all
+    from shapely.geometry import GeometryCollection, shape
+
     if max_workers == 0:
         overlap = 0
         tile_size = np.max(np.shape(var))
@@ -367,25 +428,85 @@ def generate_geojson(var, lat, lon, contours, thresholds, metadata, hex_palette,
     for v, la, lo, (i, j) in tiles:
         tile_bounds_with_overlap, tile_bounds_core = compute_tile_bounds(i, j, lat=lat, lon=lon, tile_size=tile_size, overlap=overlap)
 
-        args_list.append((v, la, lo, (i, j), thresholds, tile_bounds_with_overlap, tile_bounds_core))
+        if not np.all(v == 0.0):
+            args_list.append((v, la, lo, (i, j), thresholds, tile_bounds_with_overlap, tile_bounds_core))
 
-    all_features = []
+    level_polygons = defaultdict(list)
+
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         for result in executor.map(process_tile, args_list):
             if result:
                 # result is dict: level -> list of polygons
                 for level, polys in result.items():
-                    for poly in polys:
-                        all_features.append({
-                            "type": "Feature",
-                            "geometry": mapping(poly),
-                            "properties": {
-                                "ObjectType": "data-contour",
-                                "level": level,
-                                "level_value": contours[level] if level < len(contours) else None,
-                                "threshold": thresholds[level] if level < len(thresholds) else None
-                            }
-                        })
+                    level_polygons[level].extend(polys)
+
+    all_features = []
+    if "missing_data" in metadata:
+        missing_geoms = [shape(f["geometry"]) for f in metadata["missing_data"]]
+        
+        merged_missing = coverage_union_all(missing_geoms)
+
+        if tolerance > 0.0:
+            merged_missing = merged_missing.simplify(tolerance)
+
+        if isinstance(merged_missing, MultiPolygon):
+            parts = merged_missing.geoms
+        else:
+            parts = [merged_missing]
+
+        for part in parts:
+            if part.is_empty:
+                continue
+            all_features.append({
+                "type": "Feature",
+                "geometry": mapping(part),
+                "properties": {
+                    "ObjectType": "missing-data"
+                }
+            })
+
+    for level, polygons in level_polygons.items():
+        if not polygons:
+            continue
+
+        try:
+            merged = coverage_union_all(polygons)
+
+            if isinstance(merged, (GeometryCollection, list)):
+                geometries = [geom for geom in merged.geoms if not geom.is_empty]
+            else:
+                geometries = [merged]
+
+            for poly in geometries:
+                if tolerance > 0.0:
+                    simplified_poly = poly.simplify(tolerance)
+                else:
+                    simplified_poly = poly
+                if simplified_poly.is_empty:
+                    continue
+
+                # Explode MultiPolygon into separate features
+                if isinstance(simplified_poly, MultiPolygon):
+                    parts = simplified_poly.geoms
+                else:
+                    parts = [simplified_poly]
+
+                for part in parts:
+                    if part.is_empty:
+                        continue
+                    all_features.append({
+                        "type": "Feature",
+                        "geometry": mapping(part),
+                        "properties": {
+                            "ObjectType": "data-contour",
+                            "level": level,
+                            "level_value": contours[level] if level < len(contours) else None,
+                            "threshold": thresholds[level] if level < len(thresholds) else None
+                        }
+                    })
+
+        except Exception as e:
+            print(f"Error merging polygons for level {level}:", e)
 
     feature_collection = {
         "type": "FeatureCollection",
@@ -397,3 +518,54 @@ def generate_geojson(var, lat, lon, contours, thresholds, metadata, hex_palette,
     }
 
     return feature_collection
+
+def create_missing_data_feature(var, lat, lon, max_workers=None):
+    """
+    Function similar to the main generate geojson function which identifies missing data and produces a missing data feature collection
+    using the same tiling as the main method.
+
+    Parameters
+    ----------
+    var: binary array which has 1 as missing values and 0 as valid values
+    lat: latitude array
+    lon: longitude array
+
+    Returns:
+    --------
+    feature: feature dictionary in a format that can easily be included in an exported GeoJSON.
+    """
+
+    if max_workers == 0:
+        overlap = 0
+        tile_size = np.max(np.shape(var))
+        tiles = [(var, lat, lon, (0,0))]
+        max_workers = 1
+    else:
+        overlap = 5
+        tile_size = 150
+        tiles = tile_array(var, lat, lon, tile_size, overlap)
+
+    args_list = []
+
+    for v, la, lo, (i, j) in tiles:
+        tile_bounds_with_overlap, tile_bounds_core = compute_tile_bounds(i, j, lat=lat, lon=lon, tile_size=tile_size, overlap=overlap)
+
+        args_list.append((v, la, lo, (i, j), [0.5, 10.0], tile_bounds_with_overlap, tile_bounds_core))
+
+    missing_feature = []
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        for result in executor.map(process_tile, args_list):
+            if result:
+                # result is dict: level -> list of polygons
+                for level, polys in result.items():
+                    for poly in polys:
+                        missing_feature.append({
+                            "type": "Feature",
+                            "geometry": mapping(poly),
+                            "properties": {
+                                "ObjectType": "data-contour",
+                                "level": "missing_data",
+                            }
+                        })
+
+    return missing_feature
