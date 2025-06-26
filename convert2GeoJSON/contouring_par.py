@@ -371,13 +371,34 @@ def write_geojson(feature_collection, output_dir, input_file, entry, var_name, m
     if metadata["level_type"] == "Single":
         output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+".geojson"
     else:
-        output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+".geojson"
+        if metadata["level_units"]:
+            output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+metadata["level_units"]+".geojson"
+        else:
+            output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+".geojson"
+
+    # Reduce precision
+    feature_collection = round_coordinates(feature_collection, precision=5)
 
     # Write geojson file
 
     with open(output_file, 'w') as f:
         json.dump(feature_collection, f)
 
+def round_coordinates(feature_collection, precision=5):
+    def round_nested(obj):
+        if isinstance(obj, (list, tuple)):
+            return type(obj)(round_nested(x) for x in obj)
+        elif isinstance(obj, float):
+            return round(obj, precision)
+        else:
+            return obj
+
+    for feature in feature_collection.get("features", []):
+        geometry = feature.get("geometry")
+        if geometry and "coordinates" in geometry:
+            geometry["coordinates"] = round_nested(geometry["coordinates"])
+
+    return feature_collection
 
 def is_json_serializable(obj):
     import json
@@ -508,12 +529,18 @@ def generate_geojson(var, lat, lon, contours, thresholds, metadata, hex_palette,
         except Exception as e:
             print(f"Error merging polygons for level {level}:", e)
 
+    properties = {}
+    properties["levels"] = {i: level for i, level in enumerate(contours)}
+    properties["hex_palette"] = hex_palette
+    for key, value in metadata.items():
+        if key == "smooth_flag" and value == "false":
+            properties[key] = 0
+        else:
+            properties[key] = value
+
     feature_collection = {
         "type": "FeatureCollection",
-        "properties": {
-            "levels": {i: level for i, level in enumerate(contours)},
-            "hex_palette": hex_palette
-        },
+        "properties": properties,
         "features": all_features
     }
 

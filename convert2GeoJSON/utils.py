@@ -21,6 +21,7 @@ def input_args():
     parser.add_argument('--var_name', type=str, help="Name of variable to be read")
     parser.add_argument('--source', type=str, help="Source of the data e.g. CRR, WRF2d, WRF3dp, ...")
     parser.add_argument('--level', type=str, help="Level identifier for 3d data, e.g. for WRF3dp 800 for 800 hPa, all heights are in m")
+    parser.add_argument('--level_units', type=str, help="Level units identifier, make sure that units make sense for levels e.g. m or ft for z or hPa for pressure levels")
     parser.add_argument('--contour_start', type=numeric_type, help='Start value for contours')
     parser.add_argument('--contour_stop', type=numeric_type, help='Stop value for contours')
     parser.add_argument('--interval', type=numeric_type, help='Level interval')
@@ -169,6 +170,8 @@ def input_args():
     level_dict = {}
     if args.level:
         level_dict["level_id"] = args.level
+    if args.level_units:
+        level_dict["units"] = args.level_units
 
     return args.input_file, args.output_dir, args.var_name, args.source, smooth_dict, contour_dict, level_dict, parallel_dict, simplify_dict
 

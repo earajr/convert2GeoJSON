@@ -1,4 +1,6 @@
 # Ignore WRF out files
+testdata_output/
+testdata/
 wrfout_d0*
 
 # Byte-compiled / optimized / DLL files

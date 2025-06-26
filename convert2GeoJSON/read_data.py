@@ -25,7 +25,8 @@ def read_datafile(source, file_path, var, contour_dict, level_dict, max_workers)
         'WRF2d': read_data_from_wrf2d,
         'WRF3dp': read_data_from_wrf3dp,
         'WRF3dh': read_data_from_wrf3dh,
-        'WRFhybridp': read_data_from_hybrid_vert_wrf,
+        'WRFhybridp': read_data_from_hybrid_vert_wrf_p,
+        'WRFhybridz': read_data_from_hybrid_vert_wrf_z,
         'HYSPLIT': read_data_from_HYSPLIT,
         'CRR': read_data_from_CRR,
         'NCASradar': read_data_from_NCASradar,
@@ -112,7 +113,7 @@ def read_data_from_wrf2d(file_path, var, contour_dict, level_dict):
         CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
 
         entry_name = f"entry{i:03d}"
-        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
+        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
 
     # Close wrf_in file
     wrf_in.close()
@@ -190,7 +191,7 @@ def read_data_from_wrf3dp(file_path, var, contour_dict, level_dict):
         CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
         
         entry_name = f"entry{i:03d}"
-        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
+        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
 
     # Close wrf_in file
     wrf_in.close()
@@ -269,14 +270,14 @@ def read_data_from_wrf3dh(file_path, var, contour_dict, level_dict):
         CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
 
         entry_name = f"entry{i:03d}"
-        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
+        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
 
     # Close wrf_in file
     wrf_in.close()
 
     return data_dict
 
-def read_data_from_hybrid_vert_wrf(file_path, var, contour_dict, level_dict):
+def read_data_from_hybrid_vert_wrf_z(file_path, var, contour_dict, level_dict):
     """
     Get data from FORCE hybrid pressure level WRF netcdf input file
     WORK IN PROGRESS
@@ -298,6 +299,98 @@ def read_data_from_hybrid_vert_wrf(file_path, var, contour_dict, level_dict):
         List comprising of data, latitudes, longitudes and file
         metadata
  
+    """
+    from netCDF4 import Dataset, num2date
+    from wrf import interplevel
+    import cftime
+
+    if level_dict["units"] == "ft" or "feet":
+        level_m = float(level_dict["level_id"])*0.3048
+    else:
+        level_m = float(level_dict["level_id"])
+        level_dict["units"] == "m"
+
+    # Read input data
+    wrf_in = Dataset(file_path, "r")
+    times = wrf_in.variables["time"]
+    dtimes = num2date(times[:], times.units)
+    num_times = np.shape(dtimes)[0]
+
+    data_dict = {}
+
+    lat = wrf_in.variables["latitude"][:]
+    lon = wrf_in.variables["longitude"][:]
+
+    data_temp_3d = wrf_in.variables[var][:]
+    z = wrf_in.variables['z'][:]
+
+    data_temp_level = interplevel(data_temp_3d, z, level_m)
+
+    for i in np.arange(0, num_times, 1):
+
+        data = data_temp_level[i].values
+
+        if i == 0:
+            grid_id = "unknown"
+            sim_start_time = "unknown"
+            sim_start_time = sim_start_time.replace('_', 'T')
+            level_type = "H"+level_dict["level_id"]
+            units = wrf_in.variables[var].units
+        
+            lat_diff = np.abs((lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)] - lat[int(np.shape(lat)[0]/2)+1,int(np.shape(lat)[1]/2)]) * 110.948)
+            lon_diff = np.abs((lon[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)] - lon[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)+1]) * 110.948 * np.cos(np.deg2rad(lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)])))
+
+            dx = float(round(((lat_diff + lon_diff)/2.0)*10.0)/10.0)
+            dx_units = "km"
+
+            if dx < 20000:
+                if dx >= 1000:
+                    rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1000.0)
+                else:
+                    rec_sigma = 5.0
+            else:
+                rec_sigma = 1.5
+
+        valid_time = dtimes[i].isoformat()
+
+       # Max and min values in data
+        max_int_data = np.ceil(np.nanmax(data))
+        min_int_data = np.floor(np.nanmin(data))
+
+        # Define LEVELS and THRESHOLDS (not actual max min values, just to set approriate values for data to be added to extra frame around data.
+        CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
+
+        entry_name = f"entry{i:03d}"
+
+        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'level_units': level_dict["units"], 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : int(dx), 'grid_units': dx_units}}
+
+    # Close wrf_in file
+    wrf_in.close()
+
+    return data_dict
+
+def read_data_from_hybrid_vert_wrf_p(file_path, var, contour_dict, level_dict):
+    """
+    Get data from FORCE hybrid pressure level WRF netcdf input file
+    WORK IN PROGRESS
+
+    Parameters
+    ----------
+    input_file : str
+        Input file path
+    nc_var : str
+        NetCDF variable to extract
+    contour_dict : dictionary
+        Dictionary providing information on contour levels
+    level_dict : dictionary
+        Dictionary providing information on height level
+
+    Returns
+    -------
+    list
+        List comprising of data, latitudes, longitudes and file
+        metadata
+
     """
     from netCDF4 import Dataset, num2date
     from wrf import interplevel
@@ -336,7 +429,7 @@ def read_data_from_hybrid_vert_wrf(file_path, var, contour_dict, level_dict):
             sim_start_time = sim_start_time.replace('_', 'T')
             level_type = "P"+level_dict["level_id"]
             units = wrf_in.variables[var].units
-        
+
             lat_diff = np.abs((lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)] - lat[int(np.shape(lat)[0]/2)+1,int(np.shape(lat)[1]/2)]) * 110.948)
             lon_diff = np.abs((lon[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)] - lon[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)+1]) * 110.948 * np.cos(np.deg2rad(lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)])))
 
@@ -362,12 +455,13 @@ def read_data_from_hybrid_vert_wrf(file_path, var, contour_dict, level_dict):
 
         entry_name = f"entry{i:03d}"
 
-        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : int(dx), 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
+        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'level_units': "hPa", 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : int(dx), 'grid_units': dx_units}}
 
     # Close wrf_in file
     wrf_in.close()
 
     return data_dict
+
 
 def read_data_from_HYSPLIT(file_path, var, contour_dict, level_dict):
     """
@@ -466,7 +560,7 @@ def read_data_from_HYSPLIT(file_path, var, contour_dict, level_dict):
 
             data = data_temp4d[i,j,:,:]
 
-            data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : rec_sigma, 'origin_lats' : olats, 'origin_lons' : olons, 'origin_levels' : olvls, 'origin_times' : otims}}
+            data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'origin_lats' : olats, 'origin_lons' : olons, 'origin_levels' : olvls, 'origin_times' : otims}}
 
             count = count + 1
 
@@ -590,7 +684,7 @@ def read_data_from_CRR(file_path, var, contour_dict, level_dict, max_workers):
     data[data>50.0] = 0.0
 
     entry_name = "entry000" #each CRR file only contains a single time/level so there is only ever 1 entry
-    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': satellite_id, 'time_coverage_start': time_coverage_start, 'time_coverage_end': time_coverage_end, 'nominal_product_time' : nominal_product_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
+    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': satellite_id, 'time_coverage_start': time_coverage_start, 'time_coverage_end': time_coverage_end, 'nominal_product_time' : nominal_product_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
     # Add missing data, if available:
     if missing_data_feature:
         data_dict[entry_name]['metadata']['missing_data'] = missing_data_feature
@@ -674,7 +768,7 @@ def read_data_from_NCASradar(file_path, var, contour_dict, level_dict):
     data = grid.fields[var]["data"][0,:,:]
 
     entry_name = "entry000" # as the level is supplied on calling the function only a single 2d field is created
-    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'time_coverage_start': time_coverage_start, 'time_coverage_end': time_coverage_end, 'nominal_product_time' : time_coverage_start, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma), "site_lat" : site_lat, "site_lon" : site_lon }}
+    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'time_coverage_start': time_coverage_start, 'time_coverage_end': time_coverage_end, 'nominal_product_time' : time_coverage_start, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, "site_lat" : site_lat, "site_lon" : site_lon }}
 
     # Close radar_in file
     radar_in.close()
@@ -849,7 +943,7 @@ def read_data_from_MTG_LI_ACC(file_path, var, contour_dict, level_dict):
 
     entry_name = "entry000"
 
-    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type' : 'Single', 'grid_id': satellite_id, 'time_coverage_start': time_coverage_start, 'time_coverage_end': time_coverage_end, 'nominal_product_time' : time_coverage_end, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma) }}
+    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type' : 'Single', 'grid_id': satellite_id, 'time_coverage_start': time_coverage_start, 'time_coverage_end': time_coverage_end, 'nominal_product_time' : time_coverage_end, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
 
     return data_dict
 
@@ -1168,7 +1262,7 @@ def read_UM_data_h(file_path, var, contour_dict, level_dict):
         data = data_all[i,0,:,:]
 
         entry_name = f"entry{i:03d}"
-        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'valid_time': time_str[i], 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units, 'sigma' : float(rec_sigma)}}
+        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'valid_time': time_str[i], 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
 
     return data_dict
 
