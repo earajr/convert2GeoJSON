@@ -1,7 +1,7 @@
 #!/bin/bash
 
 eval "$(micromamba shell hook --shell=bash)"
-micromamba activate convert2GeoJSON_new
+micromamba activate convert2GeoJSON
 
 cd ../convert2GeoJSON
 

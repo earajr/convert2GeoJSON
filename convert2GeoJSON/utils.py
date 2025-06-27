@@ -56,7 +56,6 @@ def input_args():
         err_msg = "No --var_name argument. A variable to be read from the input file needs to be supplied\n"
         err_msg = err_msg.format(args.output_dir)
         raise ValueError(err_msg)
-
     # Check if data source argument exists
     if not args.source:
         err_msg = "No --source argument. The file source type needs to be supplied\n"
