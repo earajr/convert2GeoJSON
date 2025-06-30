@@ -1,2 +1,3 @@
 CRR_reader_config:
   region: Africa 
+  buffer: 500

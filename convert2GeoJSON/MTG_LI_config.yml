@@ -1,3 +1,4 @@
 MTG_LI_reader_config:
   accum_mins: 5
   region: Africa 
+  buffer: 500

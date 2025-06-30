@@ -598,15 +598,18 @@ def read_data_from_CRR(file_path, var, contour_dict, level_dict, max_workers):
     import yaml
     import os
 
-    default_region="Africa"
-    
+    default_region = "Africa"
+    default_buffer = 500
+
     try:
         # Read the CRR_config.yml file to retrieve region to be processed.
         with open('CRR_config.yml', 'r') as file:
             config = yaml.safe_load(file)
             region = config['CRR_reader_config']['region']
+            buffer = config['CRR_reader_config']['buffer']
     except:
         region = default_region
+        buffer = default_buffer
 
     # create data dictionary 
     data_dict = {}
@@ -635,7 +638,7 @@ def read_data_from_CRR(file_path, var, contour_dict, level_dict, max_workers):
     
     # Get or create mask
 
-    mask = utils.get_or_create_region_mask(region, lat, lon, "CRR", buffer_km=500)
+    mask = utils.get_or_create_region_mask(region, lat, lon, "CRR", buffer_km=buffer)
 
     # Read in data
     data = CRR_in.variables[var][:,:]
@@ -853,6 +856,19 @@ def read_data_from_MTG_LI_ACC(file_path, var, contour_dict, level_dict):
     from concurrent.futures import ProcessPoolExecutor
     from concurrent.futures import ThreadPoolExecutor
 
+    default_region = "Africa"
+    default_buffer = 500
+
+    try:
+        # Read the MTG_LI_config.yml file to retrieve region to be processed.
+        with open('MTG_LI_config.yml', 'r') as file:
+            config = yaml.safe_load(file)
+            region = config['MTG_LI_reader_config']['region']
+            buffer = config['MTG_LI_reader_config']['buffer']
+    except:
+        region = default_region
+        buffer = default_buffer
+
     # create data dictionary
     data_dict = {}
 
@@ -916,7 +932,7 @@ def read_data_from_MTG_LI_ACC(file_path, var, contour_dict, level_dict):
         rec_sigma = 1.5
 
     data = np.zeros_like(full_lat)
-    mask = utils.get_or_create_region_mask(region, full_lat, full_lon, "MTG_LI")
+    mask = utils.get_or_create_region_mask(region, full_lat, full_lon, "MTG_LI", buffer_km=buffer)
 
     # Launch parallel processing to read all the files in the my_files list
     with ThreadPoolExecutor(max_workers=3) as executor:

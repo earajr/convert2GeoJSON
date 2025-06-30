@@ -19,3 +19,8 @@ A lightweight Python toolkit to convert geospatial, atmospheric science data int
 ```bash
 git clone https://github.com/earajr/convert2GeoJSON.git
 cd convert2GeoJSON
+```
+### Download test data
+```bash
+wget https://homepages.see.leeds.ac.uk/~earajr/convert2GeoJSON/testdata.zip
+
