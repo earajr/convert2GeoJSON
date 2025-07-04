@@ -31,7 +31,8 @@ def read_datafile(source, file_path, var, contour_dict, level_dict, max_workers)
         'CRR': read_data_from_CRR,
         'NCASradar': read_data_from_NCASradar,
         'MTG_LI_ACC': read_data_from_MTG_LI_ACC,
-        'UM3dh': read_UM_data_h
+        'UM3dh': read_UM_data_h,
+        'RoA' : read_data_from_RoA
         # Add more mappings as needed
     }
 
@@ -97,13 +98,6 @@ def read_data_from_wrf2d(file_path, var, contour_dict, level_dict):
             dx = float(extract_global_attrs(wrf_in, 'DX')['DX'])
             dx_units = "m"
             level_type = "Single"
-            if dx < 20000:
-                if dx >= 1000:
-                    rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1000.0)
-                else:
-                    rec_sigma = 5.0
-            else:
-                rec_sigma = 1.5
 
         # Max and min values in data
         max_int_data = np.ceil(np.nanmax(data))
@@ -175,13 +169,6 @@ def read_data_from_wrf3dp(file_path, var, contour_dict, level_dict):
             dx = float(extract_global_attrs(wrf_in, 'DX')['DX'])
             dx_units = "m"
             level_type = "P"+level_dict["level_id"]
-            if dx < 20000:
-                if dx >= 1000:
-                    rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1000.0)
-                else:
-                    rec_sigma = 5.0
-            else:
-                rec_sigma = 1.5
 
         # Max and min values in data
         max_int_data = np.ceil(np.nanmax(data))
@@ -254,13 +241,6 @@ def read_data_from_wrf3dh(file_path, var, contour_dict, level_dict):
             dx = float(extract_global_attrs(wrf_in, 'DX')['DX'])
             dx_units = "m"
             level_type = "H"+level_dict["level_id"]
-            if dx < 20000:
-                if dx >= 1000:
-                    rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1000.0)
-                else:
-                    rec_sigma = 5.0
-            else:
-                rec_sigma = 1.5
 
        # Max and min values in data
         max_int_data = np.ceil(np.nanmax(data))
@@ -342,14 +322,6 @@ def read_data_from_hybrid_vert_wrf_z(file_path, var, contour_dict, level_dict):
 
             dx = float(round(((lat_diff + lon_diff)/2.0)*10.0)/10.0)
             dx_units = "km"
-
-            if dx < 20000:
-                if dx >= 1000:
-                    rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1000.0)
-                else:
-                    rec_sigma = 5.0
-            else:
-                rec_sigma = 1.5
 
         valid_time = dtimes[i].isoformat()
 
@@ -436,14 +408,6 @@ def read_data_from_hybrid_vert_wrf_p(file_path, var, contour_dict, level_dict):
             dx = float(round(((lat_diff + lon_diff)/2.0)*10.0)/10.0)
             dx_units = "km"
 
-            if dx < 20000:
-                if dx >= 1000:
-                    rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1000.0)
-                else:
-                    rec_sigma = 5.0
-            else:
-                rec_sigma = 1.5
-
         valid_time = dtimes[i].isoformat()
 
        # Max and min values in data
@@ -528,13 +492,6 @@ def read_data_from_HYSPLIT(file_path, var, contour_dict, level_dict):
 
     dx = float(np.abs(lat_1d[1] - lat_1d[0]))
     dx_units = "degrees"
-    if dx < 0.2:
-        if dx >= 0.01:
-            rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/0.01)
-        else:
-            rec_sigma = 5.0
-    else:
-        rec_sigma = 1.5
 
     lat, lon = np.meshgrid(lat_1d, lon_1d)
     lat = lat.transpose()
@@ -656,14 +613,6 @@ def read_data_from_CRR(file_path, var, contour_dict, level_dict, max_workers):
     dx = float(CRR_in.spatial_resolution)
     dx_units = "km"
 
-    if dx < 20:
-        if dx >= 1:
-            rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1.0)
-        else:
-            rec_sigma = 5.0
-    else:
-        rec_sigma = 1.5
-
     # Max and min values in data
     max_int_data = np.ceil(np.nanmax(data))
     min_int_data = np.floor(np.nanmin(data))
@@ -692,7 +641,7 @@ def read_data_from_CRR(file_path, var, contour_dict, level_dict, max_workers):
     if missing_data_feature:
         data_dict[entry_name]['metadata']['missing_data'] = missing_data_feature
 
-    # Close wrf_in file
+    # Close in file
     CRR_in.close()
 
     return data_dict
@@ -757,8 +706,6 @@ def read_data_from_NCASradar(file_path, var, contour_dict, level_dict):
 
     dx = (max_range_rounded*2.0)/301.0
     dx_units = "m"
-
-    rec_sigma = 1.0
 
     radar = pyart.io.read(file_path)
 
@@ -922,14 +869,6 @@ def read_data_from_MTG_LI_ACC(file_path, var, contour_dict, level_dict):
 
     dx = round(((lat_diff + lon_diff)/2.0)*10.0)/10.0
     dx_units = "km"
-
-    if dx < 20:
-        if dx >= 1:
-            rec_sigma = 5.0+(9.0/38.0) - (9/38.0)*(dx/1.0)
-        else:
-            rec_sigma = 5.0
-    else:
-        rec_sigma = 1.5
 
     data = np.zeros_like(full_lat)
     mask = utils.get_or_create_region_mask(region, full_lat, full_lon, "MTG_LI", buffer_km=buffer)
@@ -1186,8 +1125,6 @@ def read_UM_data_h(file_path, var, contour_dict, level_dict):
     dx = np.abs(lat_1d[int(len(lat_1d)/2)] - lat_1d[int((len(lat_1d)/2))+1])
     dx_units = "degrees"
 
-    rec_sigma = 1.5
-
     if hybrid_height and a.any() and b.any() and orog.any():
         a_reshaped = a.reshape(-1, 1, 1)  # Shape (85, 1, 1)
         b_reshaped = b.reshape(-1, 1, 1)  # Shape (85, 1, 1)
@@ -1282,4 +1219,110 @@ def read_UM_data_h(file_path, var, contour_dict, level_dict):
 
     return data_dict
 
+def read_data_from_RoA(file_path, var, contour_dict, level_dict):
+    """
+    Get rainfall data from RoA netcdf input file
+ 
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+    level_dict : dictionary
+        Information about the level
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
+    """
+
+    from netCDF4 import Dataset
+    from datetime import datetime, timedelta
+    from scipy.spatial import ConvexHull
+    from skimage import measure
+    from shapely.geometry import mapping
+    import yaml
+    import os
+
+    default_region = "Africa"
+    default_buffer = 500
+
+    try:
+        # Read the RoA_config.yml file to retrieve region to be processed.
+        with open('RoA_config.yml', 'r') as file:
+            config = yaml.safe_load(file)
+            region = config['RoA_reader_config']['region']
+            buffer = config['RoA_reader_config']['buffer']
+    except:
+        region = default_region
+        buffer = default_buffer
+
+    # create data dictionary 
+    data_dict = {}
+
+    RoA_in = Dataset(file_path, "r")
+
+    # THIS WILL HAVE TO CHANGE WHEN THE FILE STRUCTURE OF EXTAPOLATED RoA PRODUCTS IS CONFIRMED.
+    nominal_product_time = datetime.strptime(RoA_in.start_time, "%Y-%m-%dT%H:%M").strftime("%Y-%m-%d_%H:%M:%S")
+    time_coverage_start = datetime.strptime(RoA_in.start_time, "%Y-%m-%dT%H:%M").strftime("%Y-%m-%d_%H:%M:%S")
+    time_coverage_end = datetime.strptime(RoA_in.end_time, "%Y-%m-%dT%H:%M").strftime("%Y-%m-%d_%H:%M:%S")
+
+    # Read in lat and lon values
+    if "lat" in RoA_in.variables.keys():
+        lat_1d = RoA_in.variables["lat"][:]
+    elif "latitude" in RoA_in.variables.keys():
+        lat_1d = RoA_in.variables["latitude"][:]
+
+    if "lon" in RoA_in.variables.keys():
+        lon_1d = RoA_in.variables["lon"][:]
+    elif "longitude" in RoA_in.variables.keys():
+        lon_1d = RoA_in.variables["longitude"][:]
+    if lat_1d is None or lon_1d is None:
+        raise ValueError("Could not get latitude/longitude from input file")
+
+    lon, lat = np.meshgrid(lon_1d, lat_1d)
+
+    # Get or create mask
+
+    mask = utils.get_or_create_region_mask(region, lat, lon, "RoA", buffer_km=buffer)
+
+    # Read in data
+    data = RoA_in.variables[var][:,:]
+    data = np.where(mask, data, 0)
+
+    # Should be no need to loop over times or levels as RoA data files are always 1 per satellite image on a single level.
+    try:
+        units = RoA_in.variables[var].units
+    except:
+        if var == "posterior_mean":
+            units = "mm/hr"
+        elif var == "probability_precip":
+            units = "%"
+        else:
+            units = "undefined"
+
+    region_id = region
+    level_type = "Single"
+    dx = float(np.abs(lat_1d[1] - lat_1d[0]))
+    dx_units = "degrees"
+
+    # Max and min values in data
+    max_int_data = np.ceil(np.nanmax(data))
+    min_int_data = np.floor(np.nanmin(data))
+
+    # Define LEVELS and THRESHOLDS (not actual max min values, just to et approriate values for data to be added to extra frame around data.
+    CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
+
+    entry_name = "entry000" #each RoA file only contains a single time/level so there is only ever 1 entry
+    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': 'regular lat-lon', 'time_coverage_start': time_coverage_start, 'time_coverage_end': time_coverage_end, 'nominal_product_time' : nominal_product_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+
+    # Close in file
+    RoA_in.close()
+
+    return data_dict
 
