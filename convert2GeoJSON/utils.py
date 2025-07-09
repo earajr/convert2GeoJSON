@@ -493,3 +493,29 @@ def get_or_create_region_mask(region_name, lat, lon, reader_id, buffer_km=50, ma
     print(f"💾 Mask saved to: {mask_path}")
     return mask
 
+def add_points(feature_collection, lats, lons, properties=None):
+    """
+    Add points to an existing feature collection
+    
+    Parameters
+    ----------
+    feature_collection : dict
+        Feature collection in same structure as geojson
+    lat : list
+        List of latitudes (floats)
+    lon : list
+        List of longitude (floats)
+    properties : dict
+        Dictionary containing properties to be included for the point feature
+
+    Returns
+    -------
+    dictionary of the input feature collection but with the points added
+
+    """
+
+    for lat, lon in zip(lats, lons):
+        point_feature = { "type": "Feature", "geometry" : {"type" : "Point", "coordinates" : [lon, lat]}, "properties" : properties}
+        feature_collection["features"].append(point_feature)
+
+    return feature_collection

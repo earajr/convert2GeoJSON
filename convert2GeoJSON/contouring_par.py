@@ -371,7 +371,7 @@ def write_geojson(feature_collection, output_dir, input_file, entry, var_name, m
     if metadata["level_type"] == "Single":
         output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+".geojson"
     else:
-        if metadata["level_units"]:
+        if metadata.get("level_units"):
             output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+metadata["level_units"]+".geojson"
         else:
             output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+".geojson"

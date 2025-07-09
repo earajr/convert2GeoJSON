@@ -16,11 +16,19 @@ from tqdm import tqdm
 #level_dict = {}
 #parallel_dict = {"max_workers":10}
 
-# MTG_LI
-SOURCE = "MTG_LI_ACC"
-input_file = "../../testdata/MTG_LI/W_XX-EUMETSAT-Darmstadt,IMG+SAT,MTI1+LI-2-AFA--FD--CHK-BODY---NC4E_C_EUMT_20250615231622_L2PF_OPE_20250615231530_20250615231600_N__O_0140_0012.nc"
-VAR_NAME = "accumulated_flash_area"
-contour_dict = {"contour_method":"standard", "contour_flag":True, "contours_set":True, "interval_flag":False, "contour_thresholds":[0.5, 1.5], "colormap":"viridis"} # Mostly irrelevant but allows the read data function to work for the first file
+## MTG_LI
+#SOURCE = "MTG_LI_ACC"
+#input_file = "../../testdata/MTG_LI/W_XX-EUMETSAT-Darmstadt,IMG+SAT,MTI1+LI-2-AFA--FD--CHK-BODY---NC4E_C_EUMT_20250615231622_L2PF_OPE_20250615231530_20250615231600_N__O_0140_0012.nc"
+#VAR_NAME = "accumulated_flash_area"
+#contour_dict = {"contour_method":"standard", "contour_flag":True, "contours_set":True, "interval_flag":False, "contour_thresholds":[0.5, 1.5], "colormap":"viridis"} # Mostly irrelevant but allows the read data function to work for the first file
+#level_dict = {}
+#parallel_dict = {"max_workers":10}
+
+# RoA
+SOURCE = "RoA"
+input_file = "../../testdata/RoA/ROA-2025-06-22T15:00:00.nc"
+VAR_NAME = "posterior_mean"
+contour_dict = {"contour_method":"standard", "contour_flag":True, "contours_set":True, "interval_flag":False, "contour_thresholds":[0.2, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 15.0, 20.0, 30.0, 50.0, 200.0], "colormap":"viridis"} # Mostly irrelevant but allows the read data function to work for the first file
 level_dict = {}
 parallel_dict = {"max_workers":10}
 

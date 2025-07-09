@@ -87,7 +87,7 @@ def main():
             feature_collection = contouring_par.generate_geojson(var=data[entry]['values'], lat=data[entry]['lat'], lon=data[entry]['lon'], contours=LEVELS, thresholds=THRESHOLDS, metadata=data[entry]['metadata'], hex_palette=hex_palette, max_workers=parallel_dict["max_workers"], tolerance =simplify_dict["tolerance"])
 
             if 'site_lat' in data[entry]['metadata'] and 'site_lon' in data[entry]['metadata']:
-                feature_collection = add_points(feature_collection, [data[entry]['metadata']['site_lat']], [data[entry]['metadata']['site_lon']], {"name": "site location"})
+                feature_collection = utils.add_points(feature_collection, [data[entry]['metadata']['site_lat']], [data[entry]['metadata']['site_lon']], {"name": "site location"})
 
         # Save output
             contouring_par.write_geojson(feature_collection, output_dir, input_file, entry, VAR_NAME, data[entry]['metadata'])
