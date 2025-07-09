@@ -22,6 +22,7 @@ def main():
 
     data = read_data.read_datafile(SOURCE, input_file, VAR_NAME, contour_dict, level_dict, parallel_dict["max_workers"])
 
+
     # Instead of using real data test data can be generated to make sure that the processing of data after the reading process is all working as expected.
 #    data = test_data.generate_test_data()
 
@@ -94,6 +95,7 @@ def main():
 
     else:
         print("There is no data to create a geojson for.")
+
 
 if __name__ == "__main__":
     main()

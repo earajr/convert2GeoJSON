@@ -40,7 +40,7 @@ def read_datafile(source, file_path, var, contour_dict, level_dict, max_workers)
         raise ValueError(f"Unknown data source: {source}")
 
     data_reader_func = data_readers[source]
-
+ 
     if source == 'CRR':
         return data_reader_func(file_path, var, contour_dict, level_dict, max_workers=max_workers)
     else:
@@ -107,7 +107,7 @@ def read_data_from_wrf2d(file_path, var, contour_dict, level_dict):
         CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
 
         entry_name = f"entry{i:03d}"
-        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+        data_dict[entry_name] = {'values': data.values, 'lat': lat.values, 'lon': lon.values, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
 
     # Close wrf_in file
     wrf_in.close()
@@ -178,7 +178,8 @@ def read_data_from_wrf3dp(file_path, var, contour_dict, level_dict):
         CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
         
         entry_name = f"entry{i:03d}"
-        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+
+        data_dict[entry_name] = {'values': data.values, 'lat': lat.values, 'lon': lon.values, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
 
     # Close wrf_in file
     wrf_in.close()
@@ -250,7 +251,7 @@ def read_data_from_wrf3dh(file_path, var, contour_dict, level_dict):
         CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
 
         entry_name = f"entry{i:03d}"
-        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+        data_dict[entry_name] = {'values': data.values, 'lat': lat.values, 'lon': lon.values, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
 
     # Close wrf_in file
     wrf_in.close()

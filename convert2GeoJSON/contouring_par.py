@@ -343,7 +343,7 @@ def process_tile(args):
                 clipped = clip_polygons_to_bbox(polys, tile_bbox_core)
                 if clipped:
                     clipped_polygons[level] = clipped
-        
+       
             return clipped_polygons
 
         except Exception as e:
