@@ -32,7 +32,9 @@ def read_datafile(source, file_path, var, contour_dict, level_dict, max_workers)
         'NCASradar': read_data_from_NCASradar,
         'MTG_LI_ACC': read_data_from_MTG_LI_ACC,
         'UM3dh': read_UM_data_h,
-        'RoA' : read_data_from_RoA
+        'RoA' : read_data_from_RoA,
+        'CAMS_global' : read_data_from_CAMS_global,
+        'CAMS_europe' : read_data_from_CAMS_europe,
         # Add more mappings as needed
     }
 
@@ -1324,6 +1326,250 @@ def read_data_from_RoA(file_path, var, contour_dict, level_dict):
 
     # Close in file
     RoA_in.close()
+
+    return data_dict
+
+def read_data_from_CAMS_global(file_path, var, contour_dict, level_dict):
+    """
+    Get concentration data from CAMS netcdf input file
+ 
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+    level_dict : dictionary
+        Information about the level
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
+    """
+
+    from netCDF4 import Dataset
+    from netCDF4 import num2date
+    from datetime import datetime, timezone, timedelta
+
+    # create data dictionary 
+    data_dict = {}
+
+    # Read input data
+    CAMS_Global_in= Dataset(file_path, "r")
+
+    # Read times
+    valid_times = CAMS_Global_in.variables["valid_time"][:].compressed()
+
+    times_str = [ (datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t))).strftime('%Y-%m-%d_%H:%M:%S') for t in valid_times]
+
+    # Read levels
+    levels = CAMS_Global_in.variables["pressure_level"][:]
+    level_units = CAMS_Global_in.variables["pressure_level"].units
+    levels_str = []
+    for i, lev in enumerate(levels):
+        levels_str.append(str(lev))
+
+    # Calculate start of simulation
+    
+    sim_start_time = (datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=int(CAMS_Global_in.variables["forecast_reference_time"][:]))).strftime('%Y-%m-%d_%H:%M:%S')
+
+    lat_1d = CAMS_Global_in.variables["latitude"][:]
+    lon_1d = CAMS_Global_in.variables["longitude"][:]
+
+    dx = float(np.abs(lat_1d[1] - lat_1d[0]))
+    dx_units = "degrees"
+
+    lat, lon = np.meshgrid(lat_1d, lon_1d)
+
+    if "conc" in var:
+        if "nox" in var:
+            var1_mmr = "no"
+            var2_mmr = "no2"
+
+            data_temp4d_temp1 = CAMS_Global_in.variables[var1_mmr][:,0,:,:,:]
+            data_temp4d_temp2 = CAMS_Global_in.variables[var2_mmr][:,0,:,:,:]
+
+            data_temp4d_temp = data_temp4d_temp1 + data_temp4d_temp2
+
+        else:
+        
+            var_mmr = var.split("_")[0]
+
+            data_temp4d_temp = CAMS_Global_in.variables[var_mmr][:,0,:,:,:]
+
+        temperature = CAMS_Global_in.variables["t"][:,0,:,:,:]
+
+        data_temp4d = np.zeros_like(data_temp4d_temp)
+
+        for i, lev in enumerate(levels):
+            data_temp4d[:,i,:,:] = data_temp4d_temp[:,i,:,:]*((lev*100.0*0.02897)/(8.314*temperature[:,i,:,:]))*1000000000.0
+        units = "µg/m3"
+
+    else:
+        if "nox" in var:
+            var1 = "no"
+            var2 = "no2"
+
+            data_temp4d_temp1 = CAMS_Global_in.variables[var1][:,0,:,:,:]
+            data_temp4d_temp2 = CAMS_Global_in.variables[var2][:,0,:,:,:]
+
+            data_temp4d = data_temp4d_temp1 + data_temp4d_temp2
+
+            try:
+                units = CAMS_Global_in.variables[var1].units
+            except:
+                units = "undefined"
+
+        else:
+
+            data_temp4d = CAMS_Global_in.variables[var][:,0,:,:,:]
+
+            try:
+                units = CAMS_Global_in.variables[var].units
+            except:
+                units = "undefined"
+
+    lat = lat.transpose()
+    lon = lon.transpose()
+
+    # Max and min values in data
+    max_int_data = np.nanmax(data_temp4d)
+    min_int_data = np.nanmin(data_temp4d)
+
+    # Define LEVELS and THRESHOLDS (not actual max min values, just to set approriate values for data to be added to extra frame around data.
+    CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
+
+    count = 0
+
+    for i in np.arange(0, len(valid_times), 1):
+        for j in np.arange(0, len(levels), 1):
+
+            level_type = "P"+levels_str[j]
+            valid_time = times_str[i]
+            units = "undefined"
+
+            entry_name = f"entry{count:03d}"
+
+            data = data_temp4d[i,j,:,:]
+
+            data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+
+            count = count + 1
+
+    CAMS_Global_in.close()
+
+    return data_dict
+
+def read_data_from_CAMS_europe(file_path, var, contour_dict, level_dict):
+    """
+    Get concentration data from CAMS netcdf input file
+ 
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+    level_dict : dictionary
+        Information about the level
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
+    """
+
+    from netCDF4 import Dataset
+    from netCDF4 import num2date
+    from datetime import datetime, timezone, timedelta
+
+    # create data dictionary 
+    data_dict = {}
+
+    # Read input data
+    CAMS_Euro_in= Dataset(file_path, "r")
+
+    # Read times
+    time_var = CAMS_Euro_in.variables["time"]
+    ref_str = time_var.long_name[-8:]
+
+    ref_date = datetime.strptime(ref_str, "%Y%m%d").replace(tzinfo=timezone.utc)
+
+    time_values = time_var[:].compressed()
+
+    times_str = [(ref_date + timedelta(hours=float(h))).strftime("%Y-%m-%d_%H:%M:%S") for h in time_values ]
+
+    # Read levels
+    levels = CAMS_Euro_in.variables["level"][:]
+    level_units = CAMS_Euro_in.variables["level"].units
+    levels_str = []
+    for i, lev in enumerate(levels):
+        levels_str.append(str(int(lev)))
+
+    # Calculate start of simulation
+
+    sim_start_time = ref_date.strftime('%Y-%m-%d_%H:%M:%S')
+
+    lat_1d = CAMS_Euro_in.variables["latitude"][:]
+    lon_1d = CAMS_Euro_in.variables["longitude"][:]
+
+    lon_1d = ((lon_1d + 180) % 360) - 180
+
+    dx = float(np.abs(lat_1d[1] - lat_1d[0]))
+    dx_units = "degrees"
+
+    lat, lon = np.meshgrid(lat_1d, lon_1d)
+
+    if "nox" in var:
+        var1 = "no_conc"
+        var2 = "no2_conc"
+
+        data_temp4d_temp1 = CAMS_Euro_in.variables[var1][:,:,:,:]
+        data_temp4d_temp2 = CAMS_Euro_in.variables[var2][:,:,:,:]
+
+        data_temp4d_temp = data_temp4d_temp1 + data_temp4d_temp2
+        units = CAMS_Euro_in.variables[var1].units
+
+    else:
+
+        data_temp4d = CAMS_Euro_in.variables[var][:,:,:,:]
+        units = CAMS_Euro_in.variables[var].units
+
+    lat = lat.transpose()
+    lon = lon.transpose()
+
+    # Max and min values in data
+    max_int_data = np.nanmax(data_temp4d)
+    min_int_data = np.nanmin(data_temp4d)
+
+    # Define LEVELS and THRESHOLDS (not actual max min values, just to set approriate values for data to be added to extra frame around data.
+    CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
+
+    count = 0
+
+    for i in np.arange(0, len(time_var), 1):
+        for j in np.arange(0, len(levels), 1):
+
+            level_type = "H"+levels_str[j]
+            valid_time = times_str[i]
+            units = "undefined"
+
+            entry_name = f"entry{count:03d}"
+
+            data = data_temp4d[i,j,:,:]
+
+            data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+
+            count = count + 1
+
+    CAMS_Euro_in.close()
 
     return data_dict
 
