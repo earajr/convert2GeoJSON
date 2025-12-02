@@ -215,6 +215,12 @@ def read_data_from_wrf3dh(file_path, var, contour_dict, level_dict):
     from netCDF4 import Dataset
     from wrf import (getvar, ALL_TIMES, latlon_coords, extract_times, extract_global_attrs, is_standard_wrf_var, interplevel)
 
+    if level_dict["units"] == "ft" or "feet":
+        level_m = float(level_dict["level_id"])*0.3048
+    else:
+        level_m = float(level_dict["level_id"])
+        level_dict["units"] == "m"
+
     # Read input data
     wrf_in = Dataset(file_path, "r")
 
@@ -254,7 +260,7 @@ def read_data_from_wrf3dh(file_path, var, contour_dict, level_dict):
         CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
 
         entry_name = f"entry{i:03d}"
-        data_dict[entry_name] = {'values': data.values, 'lat': lat.values, 'lon': lon.values, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+        data_dict[entry_name] = {'values': data.values, 'lat': lat.values, 'lon': lon.values, 'metadata':{'varname' : var, 'level_type': level_type, 'level_units': level_dict["units"], 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : int(dx), 'grid_units': dx_units}}
 
     # Close wrf_in file
     wrf_in.close()
