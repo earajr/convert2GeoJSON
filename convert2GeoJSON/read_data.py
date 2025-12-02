@@ -34,6 +34,7 @@ def read_datafile(source, file_path, var, contour_dict, level_dict, max_workers)
         'UM3dh': read_UM_data_h,
         'RoA' : read_data_from_RoA,
         'CAMS_global' : read_data_from_CAMS_global,
+        'CAMS_global_2d': read_data_from_CAMS_global_2d,
         'CAMS_europe' : read_data_from_CAMS_europe,
         # Add more mappings as needed
     }
@@ -1351,6 +1352,9 @@ def read_data_from_CAMS_global(file_path, var, contour_dict, level_dict):
  
     """
 
+# THE TREATMENT OF THE PRESURE LEVEL INFORMATION IS NOT CURRENTLY CORRECT, AT THE MOMENT THE ONLY REASON THAT THE CORRECT FILES ARE GENERATED IS THAT THERE IS NO FILES WHICH CONTAIN MULTIPLE PRESSURE LEVELS. THE LEVELS INSIDE THE FILE SHOULD BE IDENTIFIED AND THEN COMPARED TO THE REQUESTED PRESSURE LEVEL IF THERE IS A MATCH THEN THE PROCESSING CAN CONTINUE ELSE THEN THERE SHOULD BE AN EXIT AS AN APPRORIATE PRESSURE LEVEL COULDN'T BE FOUND.
+#AN ALTERNATIVE OPTION IS TO DOWNLOAD THE DATA DIFFERENTLY SO THAT ALL THE PRESSURE LEVELS ARE WITHIN A SINGLE FILE. FROM SUCH A FILE ANY PRESSURE LEVEL COULD BE INTERPOLATED TO. I AM UNSURE IF THIS IS ADVANTAGOUS THOUGH, DO WE WANT TO HAVE THE OPTION TO INTERPOLATE CHMICAL FIELDS LIKE THIS?
+
     from netCDF4 import Dataset
     from netCDF4 import num2date
     from datetime import datetime, timezone, timedelta
@@ -1450,7 +1454,7 @@ def read_data_from_CAMS_global(file_path, var, contour_dict, level_dict):
 
             level_type = "P"+levels_str[j]
             valid_time = times_str[i]
-            units = "undefined"
+            units = "undefined" # UNITS NEEDS TO BE SORTED! THERE IS WORK TO BE DONE TO UNDERSTAND WHAT THE APPRORIATE METHOD HERE IS FOR UNITS (CONVERSIONS ECT).
 
             entry_name = f"entry{count:03d}"
 
@@ -1459,6 +1463,115 @@ def read_data_from_CAMS_global(file_path, var, contour_dict, level_dict):
             data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
 
             count = count + 1
+
+    CAMS_Global_in.close()
+
+    return data_dict
+
+def read_data_from_CAMS_global_2d(file_path, var, contour_dict, level_dict):
+    """
+    Get concentration data from CAMS netcdf input file (2d fields)
+ 
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+    level_dict : dictionary
+        Information about the level
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
+    """
+    from netCDF4 import Dataset
+    from netCDF4 import num2date
+    from datetime import datetime, timezone, timedelta
+
+    # create data dictionary 
+    data_dict = {}
+
+    # Read input data
+    CAMS_Global_in= Dataset(file_path, "r")
+
+    # Read times
+    valid_times = CAMS_Global_in.variables["valid_time"][:].compressed()
+
+    times_str = [ (datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t))).strftime('%Y-%m-%d_%H:%M:%S') for t in valid_times]
+
+    # Calculate start of simulation
+
+    sim_start_time = (datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=int(CAMS_Global_in.variables["forecast_reference_time"][:]))).strftime('%Y-%m-%d_%H:%M:%S')
+
+    lat_1d = CAMS_Global_in.variables["latitude"][:]
+    lon_1d = CAMS_Global_in.variables["longitude"][:]
+
+    dx = float(np.abs(lat_1d[1] - lat_1d[0]))
+    dx_units = "degrees"
+
+    lat, lon = np.meshgrid(lat_1d, lon_1d)
+
+    if "tc" in var:
+        if "tcnox" in var:
+            var1_tc = "tc_no"
+            var2_tc = "tcno2"
+
+            data_temp3d_temp1 = CAMS_Global_in.variables[var1_tc][:,0,:,:]
+            data_temp3d_temp2 = CAMS_Global_in.variables[var2_tc][:,0,:,:]
+
+            data_temp3d = data_temp3d_temp1 + data_temp3d_temp2
+
+            units = CAMS_Global_in.variables[var1_tc].units
+
+            level_type = "total column"
+
+        else:
+
+            var_tc = var
+
+            data_temp3d = CAMS_Global_in.variables[var_tc][:,0,:,:]
+
+            units = CAMS_Global_in.variables[var_tc].units
+
+            level_type = "totalcolumn"
+
+    else:
+        var_pm = var
+
+        data_temp3d = CAMS_Global_in.variables[var_pm][:,0,:,:]
+
+        units = CAMS_Global_in.variables[var_pm].units
+
+        level_type = "surfaceconc"
+
+    lat = lat.transpose()
+    lon = lon.transpose()
+
+    # Max and min values in data
+    max_int_data = np.nanmax(data_temp3d)
+    min_int_data = np.nanmin(data_temp3d)
+
+    # Define LEVELS and THRESHOLDS (not actual max min values, just to set approriate values for data to be added to extra frame around data.
+    CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
+
+    count = 0
+
+    for i in np.arange(0, len(valid_times), 1):
+
+        valid_time = times_str[i]
+
+        entry_name = f"entry{count:03d}"
+
+        data = data_temp3d[i,:,:]
+
+        data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+
+        count = count + 1
 
     CAMS_Global_in.close()
 
