@@ -16,7 +16,7 @@ def main():
     import numpy as np
 
     # Check input arguments
-    input_file, output_dir, VAR_NAME, SOURCE, smooth_dict, contour_dict, level_dict, parallel_dict, simplify_dict = utils.input_args()
+    input_file, output_dict, VAR_NAME, SOURCE, smooth_dict, contour_dict, level_dict, parallel_dict, simplify_dict = utils.input_args()
 
     # Read data file
 
@@ -91,7 +91,7 @@ def main():
                 feature_collection = utils.add_points(feature_collection, [data[entry]['metadata']['site_lat']], [data[entry]['metadata']['site_lon']], {"name": "site location"})
 
         # Save output
-            contouring_par.write_geojson(feature_collection, output_dir, input_file, entry, VAR_NAME, data[entry]['metadata'])
+            contouring_par.write_geojson(feature_collection, output_dict, input_file, entry, VAR_NAME, data[entry]['metadata'])
 
     else:
         print("There is no data to create a geojson for.")

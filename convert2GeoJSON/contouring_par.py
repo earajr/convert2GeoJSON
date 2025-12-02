@@ -350,7 +350,7 @@ def process_tile(args):
             print(f"Error processing tile ({i},{j}):", e)
             return None
 
-def write_geojson(feature_collection, output_dir, input_file, entry, var_name, metadata):
+def write_geojson(feature_collection, output_dict, input_file, entry, var_name, metadata):
     """
     Write GeoJSON data to output file
 
@@ -358,8 +358,8 @@ def write_geojson(feature_collection, output_dir, input_file, entry, var_name, m
     ----------
     feature_collection : dict
         Feature collection in same structure as geojson.
-    output_dir : str
-        Output directory path
+    output_dir : dict
+        Output dictionary containing output directory and maybe output filename
     input_file : str
         Name of input file
     entry : str
@@ -368,13 +368,17 @@ def write_geojson(feature_collection, output_dir, input_file, entry, var_name, m
     import json
     import os
 
-    if metadata["level_type"] == "Single":
-        output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+".geojson"
+    if "output_file" in output_dict:
+        output_file = os.path.join(output_dict["output_dir"], output_dict["output_file"])
     else:
-        if metadata.get("level_units"):
-            output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+metadata["level_units"]+".geojson"
+
+        if metadata["level_type"] == "Single":
+            output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+".geojson"
         else:
-            output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+".geojson"
+            if metadata.get("level_units"):
+                output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+metadata["level_units"]+".geojson"
+            else:
+                output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+".geojson"
 
     # Reduce precision
     feature_collection = round_coordinates(feature_collection, precision=5)

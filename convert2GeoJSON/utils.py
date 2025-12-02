@@ -16,8 +16,9 @@ def input_args():
     import matplotlib.pyplot as plt
 
     parser = argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('--input_file', type=str, help="Path to inputfile")
+    parser.add_argument('--input_file', type=str, help="Path to input file")
     parser.add_argument('--output_dir', type=str, help="Path to output directory")
+    parser.add_argument('--output_file', type=str, help="Path to output file")
     parser.add_argument('--var_name', type=str, help="Name of variable to be read")
     parser.add_argument('--source', type=str, help="Source of the data e.g. CRR, WRF2d, WRF3dp, ...")
     parser.add_argument('--level', type=str, help="Level identifier for 3d data, e.g. for WRF3dp 800 for 800 hPa, all heights are in m")
@@ -45,21 +46,29 @@ def input_args():
         err_msg = err_msg.format(args.input_file)
         raise ValueError(err_msg)
 
-    # Check if output directory exists
-    if not os.path.exists(args.output_dir):
-        err_msg = "Output directory {0} does not exist\n"
-        err_msg = err_msg.format(args.output_dir)
-        raise ValueError(err_msg)
+    # Require that at least one of either output_dir or output_file is provided
+    if not args.output_dir and not args.output_file:
+        raise ValueError("You must provide either --output_dir or --output_file.")
+
+    # Validate output_dir if provided
+    if args.output_dir:
+        if not os.path.isdir(args.output_dir):
+            raise ValueError(f"Output directory does not exist: {args.output_dir}")
+
+    # Validate output_file if provided
+    if args.output_file:
+        parent = os.path.dirname(args.output_file) or "."
+        if not os.path.isdir(parent):
+            raise ValueError(f"Parent directory for output_file does not exist: {parent}")
 
     # Check if variable argument exists
     if not args.var_name:
         err_msg = "No --var_name argument. A variable to be read from the input file needs to be supplied\n"
-        err_msg = err_msg.format(args.output_dir)
         raise ValueError(err_msg)
+
     # Check if data source argument exists
     if not args.source:
         err_msg = "No --source argument. The file source type needs to be supplied\n"
-        err_msg = err_msg.format(args.output_dir)
         raise ValueError(err_msg)
 
     # Create and populate contour dictionary 
@@ -172,7 +181,21 @@ def input_args():
     if args.level_units:
         level_dict["units"] = args.level_units
 
-    return args.input_file, args.output_dir, args.var_name, args.source, smooth_dict, contour_dict, level_dict, parallel_dict, simplify_dict
+    # Define output dictionary
+    output_dict = {}
+   
+    if args.output_file:
+        parent_dir = os.path.dirname(args.output_file) or "."
+        filename = os.path.basename(args.output_file)
+
+        output_dict["output_dir"] = parent_dir
+        output_dict["output_file"] = filename
+
+    elif args.output_dir:
+        output_dict["output_dir"] = args.output_dir
+
+
+    return args.input_file, output_dict, args.var_name, args.source, smooth_dict, contour_dict, level_dict, parallel_dict, simplify_dict
 
 
 def numeric_type(value):
