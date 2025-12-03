@@ -368,6 +368,8 @@ def write_geojson(feature_collection, output_dict, input_file, entry, var_name, 
     import json
     import os
 
+    print(entry)
+
     if "output_file" in output_dict:
         output_file = os.path.join(output_dict["output_dir"], output_dict["output_file"])
     else:
