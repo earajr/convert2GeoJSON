@@ -368,10 +368,14 @@ def write_geojson(feature_collection, output_dict, input_file, entry, var_name, 
     import json
     import os
 
-    print(entry)
-
     if "output_file" in output_dict:
-        output_file = os.path.join(output_dict["output_dir"], output_dict["output_file"])
+        if entry == "entry000":
+            output_file = os.path.join(output_dict["output_dir"], output_dict["output_file"])
+        else:
+            base = output_dict["output_file"]
+            root, ext = os.path.splitext(base)
+            filename = f"{root}_{entry}{ext}"
+            output_file = os.path.join(output_dict["output_dir"],filename)
     else:
 
         if metadata["level_type"] == "Single":
