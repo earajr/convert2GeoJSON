@@ -373,12 +373,12 @@ def write_geojson(feature_collection, output_dict, input_file, entry, var_name, 
     else:
 
         if metadata["level_type"] == "Single":
-            output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+".geojson"
+            output_file = output_dict["output_dir"]+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+".geojson"
         else:
             if metadata.get("level_units"):
-                output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+metadata["level_units"]+".geojson"
+                output_file = output_dict["output_dir"]+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+metadata["level_units"]+".geojson"
             else:
-                output_file = output_dir+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+".geojson"
+                output_file = output_dict["output_dir"]+"/"+os.path.splitext(os.path.basename(input_file))[0]+"_"+var_name+"_"+entry+"_"+metadata["level_type"]+".geojson"
 
     # Reduce precision
     feature_collection = round_coordinates(feature_collection, precision=5)
