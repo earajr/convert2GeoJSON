@@ -32,7 +32,7 @@ def input_args():
     parser.add_argument('--contour_thresholds', nargs="+", help="Define contours explicitly e.g --contour_thresholds 0.2 1.0 2.0 3.0 5.0 7.0 10.0 15.0 20.0 30.0 50.0 200.0")
     parser.add_argument('--contour_names', nargs="+", help="Define contour names explicitly e.g.--contour_names 0.2_1.0 1.0_2.0 2.0_3.0 3.0_5.0 5.0_7.0 7.0_10.0 10.0_15.0 15.0_20.0 20.0_30.0 30.0_50.0 50.0+")
     parser.add_argument('--colors', nargs="+", help="Define hex code colors explicitly, can only be used if contours have been explicitly set and must have 1 fewer values than the --contours argument (remove leading # from hex codes e.g. --colors 1e50d2 0294fe 00d2fc 448622 02c403 6dec02 fefe02 fdc102 ff5000 b31b26 7f7f7f")
-    parser.add_argument('--contour_method', type=str, help='Choice of contour creation method e.g. standard or pixel')
+    parser.add_argument('--contour_method', type=str, help='Choice of contour creation method e.g. standard or category')
     parser.add_argument('--parallel', action='store_true', help='A flag to parallel processing using tiling of data')
     parser.add_argument('--num_workers', type=numeric_type, help='Number of workers processing tiles in parallel')
     parser.add_argument('--simplify', action='store_true', help='A flag to denote whether polygons are to be simplified once created')
@@ -75,11 +75,13 @@ def input_args():
     contour_dict = {}
     #If contour method has been selected then use whatever method is selected else use standard
     if args.contour_method:
-        if args.contour_method in ["standard", "pixel"]:
-#            contour_dict["contour_method"] = args.contour_method  # Currently only a single contouring method is available
-            contour_dict["contour_method"] = "standard"
+        if args.contour_method in ["standard", "category"]:
+            if args.contour_method == "category":
+                print("WARNING USING THE CATEGORY FUNCTION AT THE MOMENT IS ONLY FOR USE IN SERIAL MODE AND USING DATA THAT IS ON A REGULAR LAT LON GRID")
+            contour_dict["contour_method"] = args.contour_method  # Currently only a single contouring method is available
+#            contour_dict["contour_method"] = "standard"
         else:
-           err_msg = "Unrecognised --contour_method argument. A method that is recognised needs to be supplied e.g. standard or pixel.\n"
+           err_msg = "Unrecognised --contour_method argument. A method that is recognised needs to be supplied e.g. standard or category.\n"
            err_msg = err_msg.format(args.contour_method)
            raise ValueError(err_msg)
     else:
