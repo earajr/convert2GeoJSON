@@ -2,6 +2,7 @@ import utils
 import read_data
 import contouring_par
 import test_data
+import categorise
 
 def main():
     """
@@ -21,7 +22,6 @@ def main():
     # Read data file
 
     data = read_data.read_datafile(SOURCE, input_file, VAR_NAME, contour_dict, level_dict, parallel_dict["max_workers"])
-
 
     # Instead of using real data test data can be generated to make sure that the processing of data after the reading process is all working as expected.
 #    data = test_data.generate_test_data()
@@ -48,6 +48,7 @@ def main():
                 min_data = np.nanmin(data[entry]["values"])
 
     # Calculate data range to identify if valid data is present (not all 1 value) and round min and max values to approriate values
+
     data_range = max_data - min_data
 
     if data_range != 0.0:
@@ -85,7 +86,10 @@ def main():
             else:
                 hex_palette = ["#"+hexcode for hexcode in contour_dict["color_pal"] ]
         # Get features using generate_geojson function in contouring_par (parallel contouring)
-            feature_collection = contouring_par.generate_geojson(var=data[entry]['values'], lat=data[entry]['lat'], lon=data[entry]['lon'], contours=LEVELS, thresholds=THRESHOLDS, metadata=data[entry]['metadata'], hex_palette=hex_palette, max_workers=parallel_dict["max_workers"], tolerance =simplify_dict["tolerance"])
+            if contour_dict["contour_method"] == "standard":
+                feature_collection = contouring_par.generate_geojson(var=data[entry]['values'], lat=data[entry]['lat'], lon=data[entry]['lon'], contours=LEVELS, thresholds=THRESHOLDS, metadata=data[entry]['metadata'], hex_palette=hex_palette, max_workers=parallel_dict["max_workers"], tolerance =simplify_dict["tolerance"])
+            elif contour_dict["contour_method"] == "category":
+                feature_collection = categorise.generate_geojson(var=data[entry]['values'], lat=data[entry]['lat'], lon=data[entry]['lon'], contours=LEVELS, thresholds=THRESHOLDS, metadata=data[entry]['metadata'], hex_palette=hex_palette, max_workers=parallel_dict["max_workers"], tolerance =simplify_dict["tolerance"])
 
             if 'site_lat' in data[entry]['metadata'] and 'site_lon' in data[entry]['metadata']:
                 feature_collection = utils.add_points(feature_collection, [data[entry]['metadata']['site_lat']], [data[entry]['metadata']['site_lon']], {"name": "site location"})

@@ -36,6 +36,7 @@ def read_datafile(source, file_path, var, contour_dict, level_dict, max_workers)
         'CAMS_global' : read_data_from_CAMS_global,
         'CAMS_global_2d': read_data_from_CAMS_global_2d,
         'CAMS_europe' : read_data_from_CAMS_europe,
+        '3day_onset' : read_3day_onset_data,
         # Add more mappings as needed
     }
 
@@ -1692,3 +1693,186 @@ def read_data_from_CAMS_europe(file_path, var, contour_dict, level_dict):
 
     return data_dict
 
+def read_3day_onset_data(file_path, var, contour_dict, level_dict):
+    """
+    Take onset status files (and forecast status files) and return data dictionary for onset
+
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+    level_dict : dictionary
+        Information about the level
+ 
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+ 
+    """
+
+    from netCDF4 import Dataset
+#    from netCDF4 import num2date
+    from datetime import datetime, timezone, timedelta
+    import matplotlib.pyplot as plt
+
+#    /home/earajr/ECMWF_s2s/2025_testdata/onset_status_20250531.nc
+#    /home/earajr/ECMWF_s2s/2025_testdata/forecast_status_20250812.nc
+
+    # create data dictionary
+    data_dict = {}
+
+    # Read input data
+    onset_in= Dataset(file_path, "r")
+
+    # Read times
+    ref_date = datetime.strptime(file_path.split("_")[-1].split(".")[0], "%Y%m%d").replace(tzinfo=timezone.utc)
+
+    # Read lat and lon
+
+    lat = np.round(onset_in.variables["lat"][:], 2)
+    lon = np.round(onset_in.variables["lon"][:], 2)
+
+    centre_lat=lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)]
+    offset_centre_lat=lat[int(np.shape(lat)[0]/2)+1,int(np.shape(lat)[1]/2)]
+
+    dx =np.round(np.abs(centre_lat-offset_centre_lat), 3)
+    dx_units = "degrees"
+
+    if var == "onset_state":
+        data_temp = onset_in.variables[var]
+        if "time" in data_temp.dimensions:
+            times = onset_in.variables["time"][:]
+
+            for i, time in enumerate(times):
+
+                valid_date = ref_date+ timedelta(days=i)
+                dataset = onset_in.variables[var]
+                dataset.set_auto_maskandscale(False)
+                data = dataset[i,:,:]
+
+                entry_name = f"entry{i:03d}"
+                data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' :var, 'level_type': 'Single', 'reference_date': ref_date.strftime("%Y%m%d"), 'valid_date': valid_date.strftime("%Y%m%d"), 'grid_spacing' : dx, 'grid_units': dx_units}}
+
+        else:
+            i = 0
+            valid_date = ref_date+ timedelta(days=i)
+            dataset = onset_in.variables[var]
+            dataset.set_auto_maskandscale(False)
+            data = dataset[:,:]
+
+            entry_name = f"entry{i:03d}"
+
+            data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' :var, 'level_type': 'Single', 'reference_date': ref_date.strftime("%Y%m%d"), 'valid_date': valid_date.strftime("%Y%m%d"), 'grid_spacing' : dx, 'grid_units': dx_units}}
+
+    elif var == "rain_days_ago":
+        data_temp = onset_in.variables[var]
+        if "time" in data_temp.dimensions:
+            times = onset_in.variables["time"][:]
+
+            for i, time in enumerate(times):
+
+                valid_date = ref_date + timedelta(days=i)
+                status_dataset = onset_in.variables["onset_state"]
+                status_dataset.set_auto_maskandscale(False)
+                rain_dataset = onset_in.variables[var]
+                rain_dataset.set_auto_maskandscale(False)
+
+                status = status_dataset[i,:,:]
+                rain_days_ago = rain_dataset[i,:,:]
+
+                rain_days_ago[status != 1] = -1
+
+                data = rain_days_ago
+
+                entry_name = f"entry{i:03d}"
+                data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' :var, 'level_type': 'Single', 'reference_date': ref_date.strftime("%Y%m%d"), 'valid_date': valid_date.strftime("%Y%m%d"), 'grid_spacing' : dx, 'grid_units': dx_units}}
+        else:
+            i = 0
+            valid_date = ref_date+ timedelta(days=i)
+            status_dataset = onset_in.variables["onset_state"]
+            status_dataset.set_auto_maskandscale(False)
+            rain_dataset = onset_in.variables[var]
+            rain_dataset.set_auto_maskandscale(False)
+
+            status = status_dataset[:,:]
+            rain_days_ago = rain_dataset[:,:]
+
+            rain_days_ago[status != 1] = -1
+
+            data = rain_days_ago
+
+            entry_name = f"entry{i:03d}"
+            data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' :var, 'level_type': 'Single', 'reference_date': ref_date.strftime("%Y%m%d"), 'valid_date': valid_date.strftime("%Y%m%d"), 'grid_spacing' : dx, 'grid_units': dx_units}}
+    elif var == "onset_day_of_year":
+
+        data_temp = onset_in.variables["days_since_rain_criteria_met"]
+        if "time" in data_temp.dimensions:
+            times = onset_in.variables["time"][:]
+
+            for i, time in enumerate(times):
+
+                valid_date = ref_date + timedelta(days=i)
+                status_dataset = onset_in.variables["onset_state"]
+                status_dataset.set_auto_maskandscale(False)
+                days_since_dataset = onset_in.variables["days_since_rain_criteria_met"]
+                days_since_dataset.set_auto_maskandscale(False)
+
+                status = status_dataset[i,:,:]
+                days_since = days_since_dataset[i,:,:]
+
+                days_since[status != 2] = -1
+
+                valid_np = np.datetime64(valid_date.date())
+
+                onset_doy = np.full(days_since.shape, -1, dtype=np.int16)
+
+                mask = days_since >= 0
+
+                onset_dates = valid_np - days_since[mask].astype("timedelta64[D]")
+                year_start = onset_dates.astype("datetime64[Y]")
+                onset_doy[mask] = (onset_dates - year_start).astype(int) + 1
+
+                data = onset_doy
+
+                entry_name = f"entry{i:03d}"
+                data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' :var, 'level_type': 'Single', 'reference_date': ref_date.strftime("%Y%m%d"), 'valid_date': valid_date.strftime("%Y%m%d"), 'grid_spacing' : dx, 'grid_units': dx_units}}
+
+
+        else:
+            i = 0
+            valid_date = ref_date+ timedelta(days=i)
+            status_dataset = onset_in.variables["onset_state"]
+            status_dataset.set_auto_maskandscale(False)
+            days_since_dataset = onset_in.variables["days_since_rain_criteria_met"]
+            days_since_dataset.set_auto_maskandscale(False)
+
+            status = status_dataset[:,:]
+            days_since = days_since_dataset[:,:]
+
+            days_since[status != 2] = -1
+
+            valid_np = np.datetime64(valid_date.date())
+
+            onset_doy = np.full(days_since.shape, -1, dtype=np.int16)
+
+            mask = days_since >= 0
+
+            onset_dates = valid_np - days_since[mask].astype("timedelta64[D]")
+            year_start = onset_dates.astype("datetime64[Y]")
+            onset_doy[mask] = (onset_dates - year_start).astype(int) + 1
+
+            data = onset_doy
+
+            entry_name = f"entry{i:03d}"
+            data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' :var, 'level_type': 'Single', 'reference_date': ref_date.strftime("%Y%m%d"), 'valid_date': valid_date.strftime("%Y%m%d"), 'grid_spacing' : dx, 'grid_units': dx_units}}
+
+
+    return data_dict
+
+
+    
