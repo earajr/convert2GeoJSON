@@ -544,3 +544,5 @@ def add_points(feature_collection, lats, lons, properties=None):
         feature_collection["features"].append(point_feature)
 
     return feature_collection
+
+#def add_linestrings(feature_collection, 

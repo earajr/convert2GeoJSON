@@ -1,6 +1,7 @@
 import numpy as np
 import utils
 import contouring_par
+import regrid_region
 
 def read_datafile(source, file_path, var, contour_dict, level_dict, max_workers):
     """
@@ -23,16 +24,19 @@ def read_datafile(source, file_path, var, contour_dict, level_dict, max_workers)
     """
     data_readers = {
         'WRF2d': read_data_from_wrf2d,
+        'WRF2d_winds':read_data_from_wrf2d_winds,
         'WRF3dp': read_data_from_wrf3dp,
+#        'WRF3dp_winds': read_data_from_wrf3dp_winds,
         'WRF3dh': read_data_from_wrf3dh,
+#        'WRF3dh_winds': read_data_from_wrf3dh_winds,
         'WRFhybridp': read_data_from_hybrid_vert_wrf_p,
         'WRFhybridz': read_data_from_hybrid_vert_wrf_z,
         'HYSPLIT': read_data_from_HYSPLIT,
         'CRR': read_data_from_CRR,
+        'RoA': read_data_from_RoA,
         'NCASradar': read_data_from_NCASradar,
         'MTG_LI_ACC': read_data_from_MTG_LI_ACC,
         'UM3dh': read_UM_data_h,
-        'RoA' : read_data_from_RoA,
         'CAMS_global' : read_data_from_CAMS_global,
         'CAMS_global_2d': read_data_from_CAMS_global_2d,
         'CAMS_europe' : read_data_from_CAMS_europe,
@@ -46,6 +50,8 @@ def read_datafile(source, file_path, var, contour_dict, level_dict, max_workers)
     data_reader_func = data_readers[source]
  
     if source == 'CRR':
+        return data_reader_func(file_path, var, contour_dict, level_dict, max_workers=max_workers)
+    elif source == 'RoA':
         return data_reader_func(file_path, var, contour_dict, level_dict, max_workers=max_workers)
     else:
         return data_reader_func(file_path, var, contour_dict, level_dict)
@@ -117,6 +123,91 @@ def read_data_from_wrf2d(file_path, var, contour_dict, level_dict):
     wrf_in.close()
 
     return data_dict
+
+def read_data_from_wrf2d_winds(file_path, var, contour_dict, level_dict):
+    """
+    Get data from WRF netcdf input file
+
+    Parameters
+    ----------
+    file_path : str
+        Input file path
+    var : str
+        NetCDF variable to extract
+    contour_dict: dictionary
+        Information about the contour levels that have (or haven't) been supplied as arguments
+
+    Returns
+    -------
+    data_dict: dictionary
+        Dictionary of variable values, latitudes, longitudes and metadata
+
+    """
+    import os
+    from netCDF4 import Dataset
+    from wrf import (getvar, ALL_TIMES, latlon_coords, extract_times, extract_global_attrs, is_standard_wrf_var)
+
+    # Read input data
+    wrf_in = Dataset(file_path, "r")
+
+    times = extract_times(wrf_in, ALL_TIMES)
+    num_times = len(times)
+
+    data_dict = {}
+
+    for i in np.arange(0, num_times, 1):
+        if var == "uvmet10":
+            data = getvar(wrf_in, var, timeidx=i)
+            u = data[0,:,:]
+            v = data[1,:,:]
+            ws = np.sqrt((u**2.0)+(v**2.0))
+            units = "m/s"
+
+        if i == 0:
+            lat, lon = latlon_coords(data)
+            grid_id = str(int(extract_global_attrs(wrf_in, 'GRID_ID')['GRID_ID']))
+            sim_start_time = extract_global_attrs(wrf_in, 'SIMULATION_START_DATE')['SIMULATION_START_DATE']
+            sim_start_time = sim_start_time.replace('_', 'T')
+            valid_time = str(extract_times(wrf_in, ALL_TIMES)[0])[0:22]
+            dx = float(extract_global_attrs(wrf_in, 'DX')['DX'])
+            dx_units = "m"
+            level_type = "Single"
+            WE_grid_dim = extract_global_attrs(wrf_in, 'WEST-EAST_GRID_DIMENSION')['WEST-EAST_GRID_DIMENSION']
+            SN_grid_dim = extract_global_attrs(wrf_in, 'SOUTH-NORTH_GRID_DIMENSION')['SOUTH-NORTH_GRID_DIMENSION']
+            central_lat = extract_global_attrs(wrf_in, 'CEN_LAT')['CEN_LAT']
+            central_lon = extract_global_attrs(wrf_in, 'CEN_LON')['CEN_LON']
+            true_lat1 = extract_global_attrs(wrf_in, 'TRUELAT1')['TRUELAT1']
+            true_lat2 = extract_global_attrs(wrf_in, 'TRUELAT2')['TRUELAT2']
+            standard_lon = extract_global_attrs(wrf_in, 'STAND_LON')['STAND_LON']
+            pole_lat = extract_global_attrs(wrf_in, 'POLE_LAT')['POLE_LAT']
+            pole_lon = extract_global_attrs(wrf_in, 'POLE_LON')['POLE_LON']
+            map_proj = extract_global_attrs(wrf_in, 'MAP_PROJ_CHAR')['MAP_PROJ_CHAR']
+        
+        spacing_km = regrid_region.source_spacing(lon, lat)
+        dest_lon2d, dest_lat2d = regrid_region.build_target_grid_from_points(lon, lat, spacing_km)
+
+        cache_key = f"Cells_tri_{map_proj}_{central_lat}_{central_lon}_{true_lat1}_{true_lat2}_{standard_lon}_{pole_lat}_{pole_lon}"
+
+        u_grid = regrid_region.triangulation_regrid_to_grid(lon, lat, u, dest_lon2d, dest_lat2d, cache_key, tri_cache_dir="tri_cache")
+        v_grid = regrid_region.triangulation_regrid_to_grid(lon, lat, v, dest_lon2d, dest_lat2d, cache_key, tri_cache_dir="tri_cache")
+        ws_grid = regrid_region.triangulation_regrid_to_grid(lon, lat, ws, dest_lon2d, dest_lat2d, cache_key, tri_cache_dir="tri_cache")
+
+        # Max and min values in data
+        max_int_data = np.ceil(np.nanmax(ws_grid))
+        min_int_data = np.floor(np.nanmin(ws_grid))
+
+#       # Define LEVELS and THRESHOLDS (not actual max min values, just to et approriate values for data to be added to extra frame around data.
+#        CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
+
+        entry_name = f"entry{i:03d}"
+        data_dict[entry_name] = {'values': ws_grid, 'values_u': u_grid, 'values_v': v_grid, 'lat': dest_lat2d, 'lon': dest_lon2d, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+#        data_dict[entry_name] = {'values': ws, 'values_u': u, 'values_v': v, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': grid_id, 'sim_start_time': sim_start_time, 'valid_time': valid_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+
+    # Close wrf_in file
+    wrf_in.close()
+
+    return data_dict
+
 
 def read_data_from_wrf3dp(file_path, var, contour_dict, level_dict):
     """
@@ -656,6 +747,133 @@ def read_data_from_CRR(file_path, var, contour_dict, level_dict, max_workers):
     CRR_in.close()
 
     return data_dict
+
+#def read_data_from_RoA(file_path, var, contour_dict, level_dict, max_workers):
+#    """
+#    Get concentration data from CRR netcdf input file
+# 
+#    Parameters
+#    ----------
+#    file_path : str
+#        Input file path
+#    var : str
+#        NetCDF variable to extract
+#    contour_dict: dictionary
+#        Information about the contour levels that have (or haven't) been supplied as arguments
+#    level_dict : dictionary
+#        Information about the level
+# 
+#    Returns
+#    -------
+#    data_dict: dictionary
+#        Dictionary of variable values, latitudes, longitudes and metadata
+# 
+#    """
+#
+#    from netCDF4 import Dataset
+#    from datetime import datetime, timedelta
+#    from scipy.spatial import ConvexHull
+#    from skimage import measure
+#    from shapely.geometry import mapping
+#    import yaml
+#    import os
+#
+#    default_region = "Africa"
+#    default_buffer = 500
+#
+#    try:
+#        # Read the CRR_config.yml file to retrieve region to be processed.
+#        with open('RoA_config.yml', 'r') as file:
+#            config = yaml.safe_load(file)
+#            region = config['RoA_reader_config']['region']
+#            buffer = config['RoA_reader_config']['buffer']
+#    except:
+#        region = default_region
+#        buffer = default_buffer
+#
+#    # create data dictionary 
+#    data_dict = {}
+#
+#    # Read input data
+#    RoA_in= Dataset(file_path, "r")
+#
+#    file_basename = os.path.basename(file_path)
+#    nominal_product_time = datetime.strptime(file_basename.split("_")[1].split(".")[0])
+#
+#    '''
+#    if RoA_in.product_name == "CRR":
+#        # Read times
+#        nominal_product_time = datetime.strptime(CRR_in.nominal_product_time, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d_%H:%M:%S")
+#        time_coverage_start = datetime.strptime(CRR_in.time_coverage_start, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d_%H:%M:%S")
+#        time_coverage_end = datetime.strptime(CRR_in.time_coverage_end, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d_%H:%M:%S")
+#    elif CRR_in.product_name == "EXIM":
+#        #Read times
+#        nominal_product_time = (datetime.strptime(CRR_in.nominal_product_time.split("_")[0], "%Y-%m-%dT%H:%M:%SZ")+timedelta(minutes=int(CRR_in.nominal_product_time.split("_")[1]))).strftime("%Y-%m-%d_%H:%M:%S")
+#        time_coverage_start = (datetime.strptime(CRR_in.time_coverage_start.split("_")[0], "%Y-%m-%dT%H:%M:%SZ")+timedelta(minutes=int(CRR_in.time_coverage_start.split("_")[1]))).strftime("%Y-%m-%d_%H:%M:%S")
+#        time_coverage_end = (datetime.strptime(CRR_in.time_coverage_end.split("_")[0], "%Y-%m-%dT%H:%M:%SZ")+timedelta(minutes=int(CRR_in.time_coverage_end.split("_")[1]))).strftime("%Y-%m-%d_%H:%M:%S")
+#
+#    # Read in lat and lon values
+#    if "lat" in CRR_in.variables.keys():
+#        lat = CRR_in.variables["lat"][:]
+#    if "lon" in CRR_in.variables.keys():
+#        lon = CRR_in.variables["lon"][:]
+#    if lat is None or lon is None:
+#        raise ValueError("Could not get latitude/longitude from input file")
+#
+#    # Get or create mask
+#
+#    mask = utils.get_or_create_region_mask(region, lat, lon, "CRR", buffer_km=buffer)
+#
+#    # Read in data
+#    data = CRR_in.variables[var][:,:]
+#    data = np.where(mask, data, 0)
+#
+#    # Should be no need to loop over times or levels as CRR data files are always 1 per satellite image on a single level.
+#    try:
+#        units = CRR_in.variables[var].units
+#    except:
+#        units = "undefined"
+#
+#    satellite_id = CRR_in.satellite_identifier
+#    region_id = CRR_in.region_id
+#    level_type = "Single"
+#    dx = float(CRR_in.spatial_resolution)
+#    dx_units = "km"
+#
+#    # Max and min values in data
+#    max_int_data = np.ceil(np.nanmax(data))
+#    min_int_data = np.floor(np.nanmin(data))
+#
+#    # Define LEVELS and THRESHOLDS (not actual max min values, just to et approriate values for data to be added to extra frame around data.
+#    CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
+#
+#    try:
+#        # Check if any mandatory satellite data is missing
+#        crr_conditions = CRR_in.variables["crr_conditions"][:,:]
+#        idx = np.where((crr_conditions > 8900) & (crr_conditions < 9020), 1, 0)
+#        missing_sat_data = any([len(i)>0 for i in idx])
+#    except IndexError as e:
+#        missing_sat_data = False
+#
+#    if missing_sat_data:
+#        missing_data_feature = contouring_par.create_missing_data_feature(idx, lat, lon, max_workers)
+#    else:
+#        missing_data_feature = None
+#
+#    data[data>50.0] = 0.0
+#
+#    entry_name = "entry000" #each CRR file only contains a single time/level so there is only ever 1 entry
+#    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': satellite_id, 'time_coverage_start': time_coverage_start, 'time_coverage_end': time_coverage_end, 'nominal_product_time' : nominal_product_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+#    # Add missing data, if available:
+#    if missing_data_feature:
+#        data_dict[entry_name]['metadata']['missing_data'] = missing_data_feature
+#
+#    # Close in file
+#    CRR_in.close()
+#
+#    '''
+#
+#    return data_dict
 
 def read_data_from_NCASradar(file_path, var, contour_dict, level_dict):
     """
@@ -1230,7 +1448,7 @@ def read_UM_data_h(file_path, var, contour_dict, level_dict):
 
     return data_dict
 
-def read_data_from_RoA(file_path, var, contour_dict, level_dict):
+def read_data_from_RoA(file_path, var, contour_dict, level_dict, max_workers):
     """
     Get rainfall data from RoA netcdf input file
  
@@ -1278,49 +1496,60 @@ def read_data_from_RoA(file_path, var, contour_dict, level_dict):
 
     RoA_in = Dataset(file_path, "r")
 
-    # THIS WILL HAVE TO CHANGE WHEN THE FILE STRUCTURE OF EXTAPOLATED RoA PRODUCTS IS CONFIRMED.
-    nominal_product_time = datetime.strptime(RoA_in.start_time, "%Y-%m-%dT%H:%M").strftime("%Y-%m-%d_%H:%M:%S")
-    time_coverage_start = datetime.strptime(RoA_in.start_time, "%Y-%m-%dT%H:%M").strftime("%Y-%m-%d_%H:%M:%S")
-    time_coverage_end = datetime.strptime(RoA_in.end_time, "%Y-%m-%dT%H:%M").strftime("%Y-%m-%d_%H:%M:%S")
+    file_basename = os.path.basename(file_path)
 
-    # Read in lat and lon values
+    try:
+        nominal_product_time = datetime.strptime(file_basename.split("_")[1].split(".")[0], "%Y%m%d%H%M")
+        extrapolation_mins = int(file_basename.split("_")[2].split(".")[0])
+        valid_time = nominal_product_time + timedelta(minutes=extrapolation_mins)
+        
+    except:
+        nominal_product_time = datetime.strptime(file_basename.split("_")[1].split(".")[0], "%Y%m%d%H%M")
+        valid_time = nominal_product_time
+
+    # Latitude and longitude from latest version of RoA will be on MSG pixel values not regular lat lon regridded as before.
+
     if "lat" in RoA_in.variables.keys():
-        lat_1d = RoA_in.variables["lat"][:]
+        lat = RoA_in.variables["lat"][:,:]
     elif "latitude" in RoA_in.variables.keys():
-        lat_1d = RoA_in.variables["latitude"][:]
+        lat = RoA_in.variables["latitude"][:,:]
 
     if "lon" in RoA_in.variables.keys():
-        lon_1d = RoA_in.variables["lon"][:]
+        lon = RoA_in.variables["lon"][:,:]
     elif "longitude" in RoA_in.variables.keys():
-        lon_1d = RoA_in.variables["longitude"][:]
-    if lat_1d is None or lon_1d is None:
-        raise ValueError("Could not get latitude/longitude from input file")
-
-    lon, lat = np.meshgrid(lon_1d, lat_1d)
+        lon = RoA_in.variables["longitude"][:,:]
 
     # Get or create mask
 
     mask = utils.get_or_create_region_mask(region, lat, lon, "RoA", buffer_km=buffer)
 
     # Read in data
-    data = RoA_in.variables[var][:,:]
+    data = RoA_in.variables[var][0,:,:]
     data = np.where(mask, data, 0)
+
+    # Read in time (only nominal product time, no need for time coverage details
+
+    time = RoA_in.variables['time']
+
+    nominal_product_time  = "Some time"
 
     # Should be no need to loop over times or levels as RoA data files are always 1 per satellite image on a single level.
     try:
         units = RoA_in.variables[var].units
     except:
-        if var == "posterior_mean":
+        if var == "precipitation":
             units = "mm/hr"
-        elif var == "probability_precip":
-            units = "%"
         else:
             units = "undefined"
 
     region_id = region
     level_type = "Single"
-    dx = float(np.abs(lat_1d[1] - lat_1d[0]))
-    dx_units = "degrees"
+
+    lat_diff = np.abs((lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)] - lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)+1]) * 110.948)
+    lon_diff = np.abs((lon[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)] - lon[int(np.shape(lat)[0]/2)+1,int(np.shape(lat)[1]/2)]) * 110.948 * np.cos(np.deg2rad(lat[int(np.shape(lat)[0]/2),int(np.shape(lat)[1]/2)])))
+
+    dx = round(((lat_diff + lon_diff)/2.0)*10.0)/10.0
+    dx_units = "km"
 
     # Max and min values in data
     max_int_data = np.ceil(np.nanmax(data))
@@ -1329,12 +1558,25 @@ def read_data_from_RoA(file_path, var, contour_dict, level_dict):
     # Define LEVELS and THRESHOLDS (not actual max min values, just to et approriate values for data to be added to extra frame around data.
     CONTOURS, THRESHOLDS = utils.generate_contours(contour_dict, max_int_data, min_int_data)
 
+    missing_sat_data = np.squeeze(RoA_in.variables["missing_data"][:,:])
+
+    missing_sat_data = np.where(mask, missing_sat_data, 0)
+
+    if np.any(missing_sat_data !=0):
+        print("THERE IS SOME MISSING DATA WOOP WOOP!")
+        missing_data_feature = contouring_par.create_missing_data_feature(missing_sat_data, lat, lon, max_workers)
+    else:
+        missing_data_feature = None
+
     entry_name = "entry000" #each RoA file only contains a single time/level so there is only ever 1 entry
-    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': 'regular lat-lon', 'time_coverage_start': time_coverage_start, 'time_coverage_end': time_coverage_end, 'nominal_product_time' : nominal_product_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+    data_dict[entry_name] = {'values': data, 'lat': lat, 'lon': lon, 'metadata':{'varname' : var, 'level_type': level_type, 'grid_id': 'regular lat-lon', 'nominal_product_time' : nominal_product_time, 'units' : units, 'grid_spacing' : dx, 'grid_units': dx_units}}
+    # Add missing data, if available:
+    if missing_data_feature:
+        data_dict[entry_name]['metadata']['missing_data'] = missing_data_feature
 
     # Close in file
     RoA_in.close()
-
+    
     return data_dict
 
 def read_data_from_CAMS_global(file_path, var, contour_dict, level_dict):

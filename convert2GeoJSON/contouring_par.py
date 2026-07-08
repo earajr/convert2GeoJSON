@@ -8,6 +8,40 @@ from shapely.geometry.polygon import orient
 from concurrent.futures import ProcessPoolExecutor
 from shapely.strtree import STRtree
 
+from matplotlib.path import Path
+
+def split_path_into_rings(path):
+    """
+    Convert a matplotlib Path into a list of closed rings.
+    """
+    rings = []
+
+    ring = []
+
+    for vertex, code in zip(path.vertices, path.codes):
+
+        if code == MplPath.MOVETO:
+            if len(ring) >= 3:
+                rings.append(np.asarray(ring))
+            ring = [tuple(vertex)]
+
+        elif code == MplPath.LINETO:
+            ring.append(tuple(vertex))
+
+        elif code == MplPath.CLOSEPOLY:
+            if len(ring) >= 3:
+                if ring[0] != ring[-1]:
+                    ring.append(ring[0])
+                rings.append(np.asarray(ring))
+            ring = []
+
+    if len(ring) >= 3:
+        if ring[0] != ring[-1]:
+            ring.append(ring[0])
+        rings.append(np.asarray(ring))
+
+    return rings
+
 def simplify_coords(poly, tolerance):
     """
     Simplify the geometry and return a list of simplified coordinate lists.
@@ -217,6 +251,8 @@ def get_contour_feature_data(var, lat, lon, thresholds):
     raw_polygons: dictionary containing lists of raw polygons split by the threshold level.
     """
 
+    from shapely.geometry import Polygon
+
     if np.ma.isMaskedArray(lat):
         lat = lat.filled(np.nan)
     if np.ma.isMaskedArray(lon):
@@ -249,31 +285,92 @@ def get_contour_feature_data(var, lat, lon, thresholds):
     plt.close(fig)
 
     raw_polygons = {}
-    for i, collection in enumerate(cs.collections):
-        # extract segments & polygonize as you have already done
-        segments = []
-        for path in collection.get_paths():
-            vertices = path.vertices
-            codes = path.codes
 
-            if codes is not None:
-                points = []
-                for j, (vertex, code) in enumerate(zip(vertices, codes)):
-                    if code == 1 and points:
-                        segments.extend([LineString(points[k:k+2]) for k in range(len(points)-1)])
-                        points = []
-                    points.append(vertex)
-                if len(points) > 1:
-                    segments.extend([LineString(points[k:k+2]) for k in range(len(points)-1)])
-            else:
-                segments.extend([LineString(vertices[k:k+2]) for k in range(len(vertices)-1)])
-        
+    for i, path in enumerate(cs.get_paths()):
+        segments = []
+
+        vertices = path.vertices
+        codes = path.codes
+
+        if len(vertices) == 0:
+            continue
+
+        if codes is None:
+            # Simple path without explicit MOVETO / CLOSEPOLY codes
+            for k in range(len(vertices) - 1):
+                segments.append(LineString(vertices[k:k + 2]))
+
+        else:
+            current_ring = []
+
+            for vertex, code in zip(vertices, codes):
+
+                if code == Path.MOVETO:
+                    # Start of a new independent subpath.
+                    # Flush the previous one first.
+                    if len(current_ring) > 1:
+                        for k in range(len(current_ring) - 1):
+                            segments.append(LineString(current_ring[k:k + 2]))
+
+                    current_ring = [vertex]
+
+                elif code == Path.LINETO:
+                    current_ring.append(vertex)
+
+                elif code == Path.CLOSEPOLY:
+                    # CLOSEPOLY vertex is often dummy-like, so close using
+                    # the first point in the ring.
+                    if len(current_ring) > 1:
+                        current_ring.append(current_ring[0])
+
+                        for k in range(len(current_ring) - 1):
+                            segments.append(LineString(current_ring[k:k + 2]))
+
+                    current_ring = []
+
+                else:
+                    # Ignore other path codes, e.g. CURVE3 / CURVE4.
+                    # Contours should normally only use MOVETO, LINETO, CLOSEPOLY.
+                    pass
+
+            # Flush any unclosed final ring
+            if len(current_ring) > 1:
+                for k in range(len(current_ring) - 1):
+                    segments.append(LineString(current_ring[k:k + 2]))
+
         raw_polys = list(polygonize(segments))
+
         if raw_polys:
             final_polys = remove_duplicate_holes(raw_polys)
             raw_polygons[i] = final_polys
 
     return raw_polygons
+
+#    for i, collection in enumerate(cs.collections):
+#        # extract segments & polygonize as you have already done
+#        segments = []
+#        for path in collection.get_paths():
+#            vertices = path.vertices
+#            codes = path.codes
+#
+#            if codes is not None:
+#                points = []
+#                for j, (vertex, code) in enumerate(zip(vertices, codes)):
+#                    if code == 1 and points:
+#                        segments.extend([LineString(points[k:k+2]) for k in range(len(points)-1)])
+#                        points = []
+#                    points.append(vertex)
+#                if len(points) > 1:
+#                    segments.extend([LineString(points[k:k+2]) for k in range(len(points)-1)])
+#            else:
+#                segments.extend([LineString(vertices[k:k+2]) for k in range(len(vertices)-1)])
+#        
+#        raw_polys = list(polygonize(segments))
+#        if raw_polys:
+#            final_polys = remove_duplicate_holes(raw_polys)
+#            raw_polygons[i] = final_polys
+#
+#    return raw_polygons
 
 def tile_array(data, lat, lon, tile_size, overlap):
     """
@@ -349,6 +446,43 @@ def process_tile(args):
         except Exception as e:
             print(f"Error processing tile ({i},{j}):", e)
             return None
+
+def process_untiled(args):
+    """
+    Process the tiles in parallel to create required polygons for GeoJSON generation.
+
+    Parameters:
+    -----------
+    var_tile: array of data for tile
+    lat_tile: array of latitude values for tile
+    lon_tile: array of longitude values for tile
+    i & j: indices of tile
+    thresholds: threshold levels for contouring
+    tile_bounds_with_overlap: larger tile bounds to be processed
+    tile_bounds_core: actual bounds of the tile required (used for clipping after polygon production)
+
+    Returns:
+    --------
+    clipped_polygons: Polygons that have been created using get_contour_feature_data and clipped to the correct size using clip_polygons_to_bbox
+
+    """
+
+    var_tile, lat_tile, lon_tile, (i, j), thresholds, _, _ = args
+
+    try:
+        raw_polygons = get_contour_feature_data(
+            var_tile,
+            lat_tile,
+            lon_tile,
+            thresholds
+        )
+
+        return raw_polygons if raw_polygons else None
+
+    except Exception as e:
+        print(f"Error processing tile ({i},{j}): {e}")
+        raise
+
 
 def write_geojson(feature_collection, output_dict, input_file, entry, var_name, metadata):
     """
@@ -441,22 +575,26 @@ def generate_geojson(var, lat, lon, contours, thresholds, metadata, hex_palette,
     """
 
     from collections import defaultdict
-    from shapely import coverage_union_all
+    from shapely import union_all, coverage_union_all, set_precision
     from shapely.geometry import GeometryCollection, shape
 
-    if max_workers == 0:
+
+    serial = (max_workers == 0)
+
+    if serial:
         overlap = 0
         tile_size = np.max(np.shape(var))
         tiles = [(var, lat, lon, (0,0))]
-        max_workers = 1
     else:
         overlap = 5
         tile_size = 150
         tiles = tile_array(var, lat, lon, tile_size, overlap)
 
+
     args_list = []
 
     for v, la, lo, (i, j) in tiles:
+
         tile_bounds_with_overlap, tile_bounds_core = compute_tile_bounds(i, j, lat=lat, lon=lon, tile_size=tile_size, overlap=overlap)
 
         if not np.all(v == 0.0):
@@ -464,18 +602,27 @@ def generate_geojson(var, lat, lon, contours, thresholds, metadata, hex_palette,
 
     level_polygons = defaultdict(list)
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        for result in executor.map(process_tile, args_list):
+    if serial:
+        for args in args_list:
+            result = process_untiled(args)
             if result:
-                # result is dict: level -> list of polygons
                 for level, polys in result.items():
                     level_polygons[level].extend(polys)
+
+    else:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            for result in executor.map(process_tile, args_list):
+                if result:
+                    # result is dict: level -> list of polygons
+                    for level, polys in result.items():
+                        level_polygons[level].extend(polys)
 
     all_features = []
     if "missing_data" in metadata:
         missing_geoms = [shape(f["geometry"]) for f in metadata["missing_data"]]
         
-        merged_missing = coverage_union_all(missing_geoms)
+#        merged_missing = coverage_union_all(missing_geoms)
+        merged_missing = union_all(missing_geoms)
 
         if tolerance > 0.0:
             merged_missing = merged_missing.simplify(tolerance)
@@ -501,7 +648,9 @@ def generate_geojson(var, lat, lon, contours, thresholds, metadata, hex_palette,
             continue
 
         try:
-            merged = coverage_union_all(polygons)
+
+#            merged = coverage_union_all(polygons)
+            merged = union_all(polygons)
 
             if isinstance(merged, (GeometryCollection, list)):
                 geometries = [geom for geom in merged.geoms if not geom.is_empty]
@@ -572,11 +721,12 @@ def create_missing_data_feature(var, lat, lon, max_workers=None):
     feature: feature dictionary in a format that can easily be included in an exported GeoJSON.
     """
 
-    if max_workers == 0:
+    serial = (max_workers == 0)
+
+    if serial:
         overlap = 0
         tile_size = np.max(np.shape(var))
         tiles = [(var, lat, lon, (0,0))]
-        max_workers = 1
     else:
         overlap = 5
         tile_size = 150
@@ -590,19 +740,34 @@ def create_missing_data_feature(var, lat, lon, max_workers=None):
         args_list.append((v, la, lo, (i, j), [0.5, 10.0], tile_bounds_with_overlap, tile_bounds_core))
 
     missing_feature = []
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        for result in executor.map(process_tile, args_list):
+    if serial:
+        for args in args_list:
+            result = process_untiled(args)
             if result:
-                # result is dict: level -> list of polygons
                 for level, polys in result.items():
-                    for poly in polys:
-                        missing_feature.append({
-                            "type": "Feature",
-                            "geometry": mapping(poly),
-                            "properties": {
-                                "ObjectType": "data-contour",
-                                "level": "missing_data",
-                            }
-                        })
+                    missing_feature.append({
+                                "type": "Feature",
+                                "geometry": mapping(poly),
+                                "properties": {
+                                    "ObjectType": "data-contour",
+                                    "level": "missing_data",
+                                }
+                            })
+
+    else:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            for result in executor.map(process_tile, args_list):
+                if result:
+                    # result is dict: level -> list of polygons
+                    for level, polys in result.items():
+                        for poly in polys:
+                            missing_feature.append({
+                                "type": "Feature",
+                                "geometry": mapping(poly),
+                                "properties": {
+                                    "ObjectType": "data-contour",
+                                    "level": "missing_data",
+                                }
+                            })
 
     return missing_feature

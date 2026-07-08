@@ -3,6 +3,7 @@ import read_data
 import contouring_par
 import test_data
 import categorise
+import streamlines
 
 def main():
     """
@@ -90,6 +91,15 @@ def main():
                 feature_collection = contouring_par.generate_geojson(var=data[entry]['values'], lat=data[entry]['lat'], lon=data[entry]['lon'], contours=LEVELS, thresholds=THRESHOLDS, metadata=data[entry]['metadata'], hex_palette=hex_palette, max_workers=parallel_dict["max_workers"], tolerance =simplify_dict["tolerance"])
             elif contour_dict["contour_method"] == "category":
                 feature_collection = categorise.generate_geojson(var=data[entry]['values'], lat=data[entry]['lat'], lon=data[entry]['lon'], contours=LEVELS, thresholds=THRESHOLDS, metadata=data[entry]['metadata'], hex_palette=hex_palette, max_workers=parallel_dict["max_workers"], tolerance =simplify_dict["tolerance"])
+
+            if SOURCE == "WRF2d_winds" or SOURCE == "WRF3dp_winds" or SOURCE == "WRF3dh_winds":
+                feature_collection = streamlines.add_streamlines(feature_collection, var1=data[entry]['values_u'], var2=data[entry]['values_v'], lat=data[entry]['lat'], lon=data[entry]['lon'])
+
+                # Need to work out how to gnerate streamlines from u and v data and then return these in a format that is suitable for inclusion into a geojson
+                # The feature collection needs to be updated with the streamlines (as below with the points)
+
+
+#            feature_collection = utils.add_points(feature_collection, [53.79,51.5] ,[-1.54, -0.12], ["Leeds", "London"])
 
             if 'site_lat' in data[entry]['metadata'] and 'site_lon' in data[entry]['metadata']:
                 feature_collection = utils.add_points(feature_collection, [data[entry]['metadata']['site_lat']], [data[entry]['metadata']['site_lon']], {"name": "site location"})
